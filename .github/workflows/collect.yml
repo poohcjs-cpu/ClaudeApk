@@ -37,10 +37,10 @@ jobs:
         run: |
           if git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
             git fetch -q --depth=1 origin data
-            git archive FETCH_HEAD data | tar -x
+            git -C "$GITHUB_WORKSPACE" archive FETCH_HEAD data | tar -x
             echo "이전 기록을 이어서 써요"
           elif git fetch -q --depth=1 https://github.com/poohcjs-cpu/hotdeal-radar.git data 2>/dev/null; then
-            git archive FETCH_HEAD data | tar -x
+            git -C "$GITHUB_WORKSPACE" archive FETCH_HEAD data | tar -x
             echo "hotdeal-radar 기록으로 시작해요"
           else
             echo "첫 실행이에요"
