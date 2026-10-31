@@ -10,6 +10,8 @@ import io.github.poohcjs.hotdealradar.data.isHot
 import io.github.poohcjs.hotdealradar.data.pct
 import io.github.poohcjs.hotdealradar.data.search
 import io.github.poohcjs.hotdealradar.data.targetReached
+import io.github.poohcjs.hotdealradar.data.Tier
+import io.github.poohcjs.hotdealradar.data.tier
 import io.github.poohcjs.hotdealradar.data.verdictText
 import io.github.poohcjs.hotdealradar.data.won
 import io.github.poohcjs.hotdealradar.work.DealCheckWorker
@@ -81,6 +83,31 @@ class LogicTest {
         assertTrue(all.none { it.suspicious || it.ended })
         val again = DealCheckWorker.pickNewDeals(index, s, all.map { it.key }.toSet())
         assertTrue(again.isEmpty())
+    }
+
+    @Test fun defaultsAreRealistic() {
+        val s = Settings()
+        assertEquals(10, s.threshold)
+        assertEquals(15, s.notifyThreshold)
+        assertTrue(s.onlyCheapest)
+        // 기본 기준으로 실제 데이터에서 핫딜이 나와야 한다 (30% 기준에서는 거의 비었다)
+        assertTrue(index.deals.count { isHot(it, s) } > index.deals.count { isHot(it, s.copy(threshold = 30)) })
+    }
+
+    @Test fun tiedWithAnotherMallIsNotHot() {
+        // 다른 쇼핑몰도 같은 값에 파는 딜(2위와 차이 없음)은 평균보다 싸도 핫딜이 아니다
+        val tie = index.deals.first { it.vsBest != null && it.vsBest!! < 1.0 && (it.rate ?: 0.0) >= 10 }
+        assertFalse(isHot(tie, Settings()))
+        assertTrue(isHot(tie, Settings(onlyCheapest = false)))
+        val clear = index.deals.first { (it.vsBest ?: 0.0) >= 1.0 && (it.rate ?: 0.0) >= 10 }
+        assertTrue(isHot(clear, Settings()))
+    }
+
+    @Test fun tiers() {
+        assertEquals(Tier.LEGEND, tier(30.0))
+        assertEquals(Tier.HOT, tier(15.0))
+        assertEquals(Tier.GOOD, tier(10.0))
+        assertEquals(null, tier(null))
     }
 
     @Test fun toleratesUnknownAndMissingFields() {

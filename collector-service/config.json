@@ -82,7 +82,7 @@
   },
 
   "alerts": {
-    "threshold": 30,
+    "threshold": 10,
     "categories": [],
     "keywords": [],
     "keyword_threshold": 15,

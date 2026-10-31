@@ -13,15 +13,20 @@ import kotlinx.serialization.builtins.serializer
 /** 사용자 설정. 웹앱(localStorage)과 같은 항목을 기기에 저장한다. */
 @Serializable
 data class Settings(
-    val threshold: Int = 30,                     // 핫딜 기준 할인율(%) 5~70
+    // 기본값 근거(2026-11 실제 수집 데이터): 다나와에서 가장 싼 판매처는 평소에도 나머지 평균보다 10% 안팎 싸다(중간값 10.3%).
+    // 그래서 '평균보다 5%'는 평소 최저가 수준이라 거의 모든 제품이 걸린다. 평균보다 10% 이상 싸면서
+    // 다른 어느 쇼핑몰보다도 싼 딜만 핫딜로 본다.
+    val schema: Int = 0,                         // 설정 형식 버전 (옛 기본값을 새 기본값으로 옮길 때 사용)
+    val threshold: Int = 10,                     // 핫딜 기준 할인율(%) 5~70, 쇼핑몰 평균가 대비
     val interests: List<String> = emptyList(),   // 관심 제품군
     val interestOnly: Boolean = true,            // 관심 제품군만 핫딜 탭에 보이기
     val excludedMalls: List<String> = emptyList(),
     val hiddenSources: List<String> = emptyList(),
     val hideSuspicious: Boolean = true,          // '가격 확인 필요'(평균보다 60% 넘게 쌈) 숨기기
     val hideEnded: Boolean = true,
+    val onlyCheapest: Boolean = true,            // 다른 쇼핑몰이 같거나 더 싸게 파는 딜은 핫딜로 치지 않기
     val notify: Boolean = true,                  // 새 핫딜 알림
-    val notifyThreshold: Int = 30,               // 알림 기준(%)
+    val notifyThreshold: Int = 15,               // 알림 기준(%) — 화면 기준보다 조금 높여 정말 좋은 딜만 알림
     val notifyInterestsOnly: Boolean = true,
     val notifyTarget: Boolean = true,            // 찜 목표가 도달 알림
     val dataUrl: String = "",                    // 비우면 기본 주소
@@ -51,9 +56,20 @@ class Prefs(context: Context) {
     private val _favs = MutableStateFlow(readFavs())
     val favs: StateFlow<Map<String, Fav>> = _favs.asStateFlow()
 
-    private fun readSettings(): Settings =
-        sp.getString(K_SETTINGS, null)?.let { runCatching { JSON.decodeFromString(Settings.serializer(), it) }.getOrNull() }?.clamp()
-            ?: Settings()
+    private fun readSettings(): Settings {
+        val stored = sp.getString(K_SETTINGS, null)
+            ?.let { runCatching { JSON.decodeFromString(Settings.serializer(), it) }.getOrNull() }
+            ?: return Settings(schema = SCHEMA)
+        if (stored.schema >= SCHEMA) return stored.clamp()
+        // 첫 버전의 기본값(30%)을 그대로 쓰던 사람은 새 기본값으로 옮긴다. 직접 바꾼 값은 그대로 둔다.
+        val migrated = stored.copy(
+            schema = SCHEMA,
+            threshold = if (stored.threshold == 30) 10 else stored.threshold,
+            notifyThreshold = if (stored.notifyThreshold == 30) 15 else stored.notifyThreshold,
+        ).clamp()
+        sp.edit { putString(K_SETTINGS, JSON.encodeToString(Settings.serializer(), migrated)) }
+        return migrated
+    }
 
     private fun readFavs(): Map<String, Fav> =
         sp.getString(K_FAVS, null)?.let { runCatching { JSON.decodeFromString(favSerializer, it) }.getOrNull() } ?: emptyMap()
@@ -92,6 +108,7 @@ class Prefs(context: Context) {
         set(v) = sp.edit { putString(K_RECENT, v.take(8).joinToString("\n")) }
 
     companion object {
+        const val SCHEMA = 2
         private const val K_SETTINGS = "settings"
         private const val K_FAVS = "favs"
         private const val K_VISIT = "lastVisit"

@@ -45,6 +45,8 @@ data class Item(
     val views: Int? = null,
     val image: String = "",
     val mentions: List<Mention> = emptyList(),
+    /** 다음으로 싼 곳(커뮤니티 딜: 다른 쇼핑몰 최저가, 발굴: 두 번째로 싼 곳)보다 몇 % 싼지. 모르면 null */
+    val vsBest: Double? = null,
     val verifyStatus: String? = null,
     val verifyReason: String? = null,
     val priceFromBody: Boolean = false,
@@ -56,6 +58,9 @@ data class Item(
     val save: Long?
         get() = referencePrice?.let { ref -> ref - (dealTotal ?: price ?: return null) }
 }
+
+private fun cheaperBy(price: Long?, other: Long?): Double? =
+    if (price == null || other == null || other <= 0) null else (other - price) * 100.0 / other
 
 fun parseTime(iso: String?): Long? =
     iso?.let { runCatching { OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() }
@@ -108,6 +113,7 @@ class Index(val file: DealsFile) {
                 basis = d.basis, secondPrice = d.secondPrice, unitAdjusted = d.unitAdjusted, suspicious = d.suspicious,
                 ended = d.ended, votes = d.votes, comments = d.comments, views = d.views,
                 image = d.image.ifBlank { products[d.pcode]?.image.orEmpty() }, mentions = d.mentions,
+                vsBest = if (d.kind == "market") cheaperBy(d.price, d.secondPrice) else cheaperBy(d.dealTotal ?: d.price, d.lowest),
             )
         }
 
@@ -128,6 +134,7 @@ class Index(val file: DealsFile) {
             image = v.pcode?.let { products[it]?.image }.orEmpty(),
             mentions = listOf(Mention(p.id, p.source, p.url, p.votes, p.comments, p.postedAt, p.ended)),
             verifyStatus = v.status, verifyReason = v.reason, priceFromBody = p.priceFrom == "body",
+            vsBest = if (ok) cheaperBy(v.dealTotal ?: p.price, v.lowest) else null,
         )
     }
 
@@ -141,6 +148,8 @@ class Index(val file: DealsFile) {
         reference = if (p.othersAverage != null) "average" else null, referencePrice = p.othersAverage,
         dealTotal = p.lowest, average = p.average, lowest = p.lowest, lowestMall = p.bestMall, malls = p.malls,
         image = p.image,
+        secondPrice = p.offers.map { it.price }.sorted().getOrNull(1),
+        vsBest = cheaperBy(p.lowest, p.offers.map { it.price }.sorted().getOrNull(1)),
     )
 
     fun find(key: String): Item? = when {
@@ -166,7 +175,21 @@ data class BestPrice(val price: Long, val mall: String, val via: String, val dea
 
 // ── 판정 ─────────────────────────────────────────────────────
 
-fun isHot(x: Item, s: Settings) = x.rate != null && x.rate >= s.threshold
+/** 다른 쇼핑몰이 같은 값이거나 더 싸면(1% 미만 차이) 핫딜로 치지 않는다. 비교할 값이 없으면 통과 */
+fun beatsOthers(x: Item) = x.vsBest == null || x.vsBest >= 1.0
+
+fun isHot(x: Item, s: Settings) = x.rate != null && x.rate >= s.threshold && (!s.onlyCheapest || beatsOthers(x))
+
+enum class Tier(val label: String) { LEGEND("역대급"), HOT("핫딜"), GOOD("알뜰") }
+
+/** 할인율 단계: 30% 이상 역대급, 15% 이상 핫딜, 그 아래는 알뜰 */
+fun tier(rate: Double?): Tier? = when {
+    rate == null -> null
+    rate >= 30 -> Tier.LEGEND
+    rate >= 15 -> Tier.HOT
+    rate > 0 -> Tier.GOOD
+    else -> null
+}
 
 fun interestActive(s: Settings) = s.interestOnly && s.interests.isNotEmpty()
 
@@ -229,6 +252,9 @@ fun verdictText(x: Item, s: Settings, srcName: (String) -> String = { it }): Str
     }
     if (x.kind == ItemKind.MARKET && x.secondPrice != null && price != null && x.secondPrice > price) {
         sb.append(" 두 번째로 싼 곳보다 ${won(x.secondPrice - price)}원 싸요.")
+    }
+    if (!beatsOthers(x)) {
+        sb.append(" 다만 다른 쇼핑몰에서도 거의 같은 값에 팔고 있어 특별히 싼 딜은 아니에요.")
     }
     return sb.toString()
 }

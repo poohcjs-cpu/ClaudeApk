@@ -68,6 +68,17 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all { test ->
+                // 화면 그림 테스트(ScreenshotTest)는 -Pscreenshots 를 줄 때만 돈다
+                if (!project.hasProperty("screenshots")) test.exclude("**/ScreenshotTest*")
+                test.systemProperty("screenshots.dir", layout.buildDirectory.dir("screenshots").get().asFile.absolutePath)
+            }
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -98,4 +109,8 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network)
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }

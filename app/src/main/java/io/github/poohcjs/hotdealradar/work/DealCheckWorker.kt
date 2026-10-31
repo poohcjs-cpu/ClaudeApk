@@ -26,6 +26,7 @@ import io.github.poohcjs.hotdealradar.data.Item
 import io.github.poohcjs.hotdealradar.data.Prefs
 import io.github.poohcjs.hotdealradar.data.Repository
 import io.github.poohcjs.hotdealradar.data.Settings
+import io.github.poohcjs.hotdealradar.data.beatsOthers
 import io.github.poohcjs.hotdealradar.data.dealVisible
 import io.github.poohcjs.hotdealradar.data.pct
 import io.github.poohcjs.hotdealradar.data.won
@@ -140,7 +141,7 @@ class DealCheckWorker(context: Context, params: WorkerParameters) : CoroutineWor
             if (already.isEmpty()) return emptyList()
             return index.deals
                 .filter { it.key !in already }
-                .filter { (it.rate ?: 0.0) >= s.notifyThreshold }
+                .filter { (it.rate ?: 0.0) >= s.notifyThreshold && (!s.onlyCheapest || beatsOthers(it)) }
                 .filter { dealVisible(it, s.copy(hideSuspicious = true, hideEnded = true)) }
                 .filter { !s.notifyInterestsOnly || s.interests.isEmpty() || it.cat in s.interests }
                 .sortedByDescending { it.rate }

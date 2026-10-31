@@ -1,5 +1,8 @@
 package io.github.poohcjs.hotdealradar.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -9,10 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -23,6 +24,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.poohcjs.hotdealradar.data.Index
@@ -31,9 +34,12 @@ import io.github.poohcjs.hotdealradar.data.Settings
 import io.github.poohcjs.hotdealradar.ui.components.ChipOption
 import io.github.poohcjs.hotdealradar.ui.components.ChipRow
 import io.github.poohcjs.hotdealradar.ui.components.EmptyNote
+import io.github.poohcjs.hotdealradar.ui.components.Pill
 import io.github.poohcjs.hotdealradar.ui.components.PostRow
+import io.github.poohcjs.hotdealradar.ui.components.SortTabs
 import io.github.poohcjs.hotdealradar.ui.theme.Bad
 import io.github.poohcjs.hotdealradar.ui.theme.Good
+import io.github.poohcjs.hotdealradar.ui.theme.HD
 import io.github.poohcjs.hotdealradar.ui.theme.Warn
 
 fun statusColor(status: String): Color? = when (status) {
@@ -45,6 +51,18 @@ fun statusColor(status: String): Color? = when (status) {
 }
 
 @Composable
+fun ScreenTitle(title: String, sub: String? = null) {
+    val p = HD.p
+    Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 14.dp)) {
+        Text(title, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = p.ink, letterSpacing = (-0.7).sp)
+        if (sub != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(sub, fontSize = 13.5.sp, lineHeight = 19.sp, color = p.sub)
+        }
+    }
+}
+
+@Composable
 fun CommunityScreen(
     index: Index,
     s: Settings,
@@ -52,12 +70,13 @@ fun CommunityScreen(
     onHideEnded: (Boolean) -> Unit,
     onOpen: (Item) -> Unit,
 ) {
+    val p = HD.p
     var src by rememberSaveable { mutableStateOf("all") }
     var sort by rememberSaveable { mutableStateOf("new") }
     var cmpOnly by rememberSaveable { mutableStateOf(false) }
     var limit by rememberSaveable { mutableIntStateOf(60) }
 
-    val srcs = index.file.sources.filter { it.id != "danawa" && (it.enabled || index.posts.any { p -> p.source == it.id }) }
+    val srcs = index.file.sources.filter { it.id != "danawa" && (it.enabled || index.posts.any { pp -> pp.source == it.id }) }
     val base = index.posts.filter { !(s.hideEnded && it.ended) && (!cmpOnly || it.rate != null) }
     val list = (if (src == "all") base else base.filter { it.source == src }).let { l ->
         when (sort) {
@@ -71,14 +90,10 @@ fun CommunityScreen(
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = contentPadding) {
         item {
-            Column(Modifier.padding(16.dp)) {
-                Text("커뮤니티", style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "핫딜 게시판에 최근 ${index.file.params.keepHours}시간 동안 올라온 글이에요. 다나와에서 같은 제품을 찾으면 다른 쇼핑몰 평균가와 비교한 결과를 붙였어요.",
-                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            ScreenTitle(
+                "커뮤니티",
+                "핫딜 게시판에 최근 ${index.file.params.keepHours}시간 동안 올라온 글이에요. 다나와에서 같은 제품을 찾으면 다른 쇼핑몰 평균가와 비교한 결과를 붙였어요.",
+            )
         }
         item {
             ChipRow(
@@ -89,35 +104,35 @@ fun CommunityScreen(
             )
         }
         item {
-            ChipRow(listOf(ChipOption("new", "최신순"), ChipOption("discount", "할인율"), ChipOption("hot", "반응순")), sort, { sort = it })
-        }
-        item {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = cmpOnly, onCheckedChange = { cmpOnly = it })
-                Text("비교된 글만", fontSize = 13.sp)
-                Spacer(Modifier.padding(8.dp))
-                Checkbox(checked = s.hideEnded, onCheckedChange = onHideEnded)
-                Text("끝난 딜 숨기기", fontSize = 13.sp)
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Pill(if (cmpOnly) "✓ 비교된 글만" else "비교된 글만", cmpOnly, { cmpOnly = !cmpOnly })
+                Pill(if (s.hideEnded) "✓ 끝난 딜 숨김" else "끝난 딜 숨김", s.hideEnded, { onHideEnded(!s.hideEnded) })
             }
         }
         item {
-            Text(
-                "글 ${list.size}개 · 비교됨 ${checked}개 · 기준(${s.threshold}%) 이상 ${hotN}개",
-                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("글 ${list.size} · 비교 $checked · 기준 이상 $hotN", fontSize = 12.5.sp, color = p.faint, modifier = Modifier.weight(1f))
+                SortTabs(listOf("new" to "최신순", "discount" to "할인율", "hot" to "반응순"), sort, { sort = it })
+            }
         }
-        if (list.isEmpty()) item { EmptyNote("글이 없어요", "다른 게시판을 고르거나 필터를 풀어 보세요.") }
-        items(list.take(limit), key = { it.key }) { p ->
-            PostRow(p, index.srcName(p.source), s.threshold) { onOpen(index.itemForPost(p)) }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(horizontal = 16.dp))
+        if (list.isEmpty()) item { EmptyNote("글이 없어요", "다른 게시판을 고르거나 필터를 풀어 보세요.", "📭") }
+        itemsIndexed(list.take(limit), key = { _, it -> it.key }) { i, pp ->
+            Column(Modifier.fillMaxWidth().background(p.card)) {
+                if (i > 0) HorizontalDivider(color = p.line, modifier = Modifier.padding(start = 68.dp))
+                PostRow(pp, index.srcName(pp.source), s.threshold) { onOpen(index.itemForPost(pp)) }
+            }
         }
         if (list.size > limit) {
             item {
-                androidx.compose.material3.TextButton(onClick = { limit += 60 }, modifier = Modifier.fillMaxWidth()) {
-                    Text("더 보기 (${list.size - limit}개 남음)")
-                }
+                Text(
+                    "더 보기 (${list.size - limit}개 남음)", textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold, color = p.sub,
+                    modifier = Modifier.fillMaxWidth().background(p.card).clickable { limit += 60 }.padding(18.dp),
+                )
             }
         }
-        item { Spacer(Modifier.height(24.dp)) }
+        item { Spacer(Modifier.height(28.dp)) }
     }
 }
