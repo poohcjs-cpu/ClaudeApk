@@ -4,10 +4,15 @@
 커뮤니티 핫딜 글을 다나와 쇼핑몰 가격과 비교해서, **쇼핑몰 평균가보다 내 기준 이상 싼 딜**만 골라 보여 주고 알림을 보내요.
 
 ```
-hotdeal-radar (GitHub Actions, 30분마다)        이 앱
+collector-service (이 저장소의 GitHub Actions, 30분마다)        앱
   커뮤니티 글 수집 → 다나와 가격 비교      →     deals.json 받기 → 화면 · 알림
-  → docs/data/deals.json (GitHub Pages)
+  → data 브랜치의 deals.json
 ```
+
+수집기는 [hotdeal-radar](https://github.com/poohcjs-cpu/hotdeal-radar)의 수집기를 보완한 판이에요(`collector-service/`).
+다나와 새 검색 화면 대응, 카드 조건가 제외, '원' 없는 가격·본문 가격 읽기, 막힌 출처 재시도 간격 늘리기가 들어 있어요.
+`.github/workflows/collect.yml`이 30분마다 돌려 결과를 `data` 브랜치에 올리고, 앱은
+`https://raw.githubusercontent.com/poohcjs-cpu/ClaudeApk/data/deals.json`을 받아요. 받지 못하면 hotdeal-radar 웹앱의 데이터로 다시 시도해요.
 
 앱은 사이트를 직접 긁지 않아요. 수집기가 만든 `deals.json` 한 파일만 받아요. 그래서 배터리·데이터를 거의 쓰지 않고, 사이트에 부담을 주지도 않아요.
 

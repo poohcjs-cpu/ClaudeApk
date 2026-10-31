@@ -26,7 +26,9 @@ android {
         targetSdk = 36
         versionCode = buildNumber
         versionName = "1.0.$buildNumber"
-        buildConfigField("String", "DEFAULT_DATA_URL", "\"https://poohcjs-cpu.github.io/hotdeal-radar/data/deals.json\"")
+        // 이 저장소의 수집기(collector-service)가 30분마다 올리는 결과. 받지 못하면 예전 웹앱 주소로 다시 시도한다.
+        buildConfigField("String", "DEFAULT_DATA_URL", "\"https://raw.githubusercontent.com/poohcjs-cpu/ClaudeApk/data/deals.json\"")
+        buildConfigField("String", "FALLBACK_DATA_URL", "\"https://poohcjs-cpu.github.io/hotdeal-radar/data/deals.json\"")
     }
 
     signingConfigs {

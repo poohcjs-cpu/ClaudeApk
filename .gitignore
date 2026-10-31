@@ -8,3 +8,7 @@ keystore.properties
 *.iml
 .kotlin/
 captures/
+__pycache__/
+*.pyc
+collector-service/data/
+collector-service/docs/

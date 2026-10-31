@@ -36,10 +36,24 @@ class Repository(private val context: Context, private val prefs: Prefs) {
         cacheFile.takeIf { it.exists() }?.let { f -> runCatching { parse(f.readText()) }.getOrNull() }
     }
 
-    /** 새로 받기. 실패하면 IOException. */
+    /** 새로 받기. 기본 주소가 실패하면 예비 주소로 한 번 더. 모두 실패하면 IOException. */
     suspend fun fetch(): DealsFile = withContext(Dispatchers.IO) {
+        val custom = prefs.settings.value.dataUrl.trim()
+        val urls = if (custom.isNotEmpty()) listOf(custom) else listOf(BuildConfig.DEFAULT_DATA_URL, BuildConfig.FALLBACK_DATA_URL)
+        var last: IOException? = null
+        for (url in urls) {
+            try {
+                return@withContext fetchFrom(url)
+            } catch (e: IOException) {
+                last = e
+            }
+        }
+        throw last ?: IOException("받을 주소가 없어요")
+    }
+
+    private fun fetchFrom(url: String): DealsFile {
         val req = Request.Builder()
-            .url(dataUrl())
+            .url(url)
             .cacheControl(CacheControl.FORCE_NETWORK)
             .header("User-Agent", "HotdealRadar-Android/${BuildConfig.VERSION_NAME}")
             .build()
@@ -50,7 +64,7 @@ class Repository(private val context: Context, private val prefs: Prefs) {
             val tmp = File(context.filesDir, "deals.json.tmp")
             tmp.writeText(text)
             tmp.renameTo(cacheFile)
-            data
+            return data
         }
     }
 
