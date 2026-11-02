@@ -56,8 +56,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // 코드 압축(R8)을 끈다: 실제 기기에서 시험할 수 없는 환경이라, 테스트한 코드와 설치되는 코드를
+            // 똑같이 두는 쪽이 안전하다 (압축하면 실시간 검색처럼 테스트에서는 되던 것이 기기에서만 깨질 수 있다).
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }

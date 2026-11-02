@@ -57,4 +57,9 @@ class LiveSearchTest {
         val s = """xx{"a":"}{","b":{"c":1}}yy"""
         assertEquals(s.length - 2, DanawaParser.objectEnd(s, 2))
     }
+
+    @Test fun unescapesJsonStrings() {
+        assertEquals("a\"b\\c/d\n<b>한</b>", DanawaParser.unescapeJsonString("a\\\"b\\\\c\\/d\\n\\u003cb\\u003e\\ud55c\\u003c/b\\u003e"))
+        assertEquals("그대로", DanawaParser.unescapeJsonString("그대로"))
+    }
 }

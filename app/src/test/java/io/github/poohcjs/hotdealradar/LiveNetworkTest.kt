@@ -22,4 +22,14 @@ class LiveNetworkTest {
         println("상품 ${page.name}: 판매처 ${page.offers.size}곳, 최저 ${page.offers.firstOrNull()}")
         assertTrue(page.offers.isNotEmpty())
     }
+
+    @Test fun babyToothpaste() = runBlocking {
+        val c = LiveSearchClient()
+        for (q in listOf("아기 치약", "아기치약", "유아 치약")) {
+            val list = c.search(q)
+            println("[$q] 결과 ${list.size}개 (중고 제외 ${list.count { !it.used }}개)")
+            list.take(5).forEach { println("   ${it.name} | ${it.price}원 | ${it.unit?.text} | 옵션 ${it.options.size}") }
+            assertTrue(list.isNotEmpty())
+        }
+    }
 }

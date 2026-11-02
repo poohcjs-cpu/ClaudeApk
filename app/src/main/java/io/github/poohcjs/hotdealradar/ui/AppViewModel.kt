@@ -106,10 +106,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun liveError(e: Throwable): String = when (e) {
-        is LiveBlocked -> "다나와가 지금은 앱의 요청을 받지 않아요. 아래 버튼으로 다나와에서 직접 볼 수 있어요"
-        is java.io.IOException -> "다나와에 연결하지 못했어요. 인터넷 연결을 확인해 주세요"
-        else -> "다나와 화면을 읽지 못했어요 (${e.javaClass.simpleName})"
+    private fun liveError(e: Throwable): String {
+        val why = when (e) {
+            is LiveBlocked -> "다나와가 지금은 앱의 요청을 받지 않아요."
+            is java.io.IOException -> "다나와에 연결하지 못했어요. 인터넷 연결을 확인해 주세요."
+            else -> "다나와 화면을 읽지 못했어요."
+        }
+        // 다시 생기면 원인을 알 수 있게 기술적인 내용도 작게 남긴다
+        return "$why 아래 버튼으로 네이버쇼핑·다나와에서 바로 볼 수 있어요.\n(오류: ${e.javaClass.simpleName}${e.message?.let { ": " + it.take(80) } ?: ""})"
     }
 
     fun toggleFavLive(pcode: String, name: String, price: Long?, image: String) {

@@ -202,11 +202,11 @@ fun SearchScreen(
             }
             live.error != null -> {
                 item { EmptyNote("지금은 실시간 가격을 못 불러왔어요", live.error, "📡") }
-                item { DanawaButton(submitted) { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(danawaSearchUrl(submitted)))) } }
+                item { OtherSites(submitted) { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }
             }
             sorted.isEmpty() -> {
                 item { EmptyNote("검색 결과가 없어요", "다른 이름으로 찾아보거나 다나와에서 직접 볼 수 있어요.", "🔎") }
-                item { DanawaButton(submitted) { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(danawaSearchUrl(submitted)))) } }
+                item { OtherSites(submitted) { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }
             }
             else -> {
                 val top = sorted.first()
@@ -234,7 +234,7 @@ fun SearchScreen(
                     val opt = pickOption(prod, sort)
                     LiveRow(prod, opt, sort, index, fav = (opt?.pcode ?: prod.pcode) in favs) { onOpenLive(opt?.pcode ?: prod.pcode) }
                 }
-                item { DanawaButton(submitted) { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(danawaSearchUrl(submitted)))) } }
+                item { OtherSites(submitted) { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }
             }
         }
         item { Spacer(Modifier.height(28.dp)) }
@@ -255,14 +255,30 @@ private fun ChipLine(words: List<String>, onClick: (String) -> Unit) {
     }
 }
 
+fun naverShoppingUrl(q: String) = "https://search.shopping.naver.com/ns/search?query=" + Uri.encode(q.trim())
+
+/** 다나와에 없거나 더 찾아보고 싶을 때: 같은 검색어로 네이버쇼핑·다나와를 바로 연다 (앱이 대신 읽지 않고 사용자가 직접 봄) */
 @Composable
-private fun DanawaButton(q: String, onClick: () -> Unit) {
+private fun OtherSites(q: String, open: (String) -> Unit) {
     val p = HD.p
-    Text(
-        "다나와에서 \"${q.trim()}\" 직접 보기  ↗", fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = p.ink, textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth().padding(20.dp).clip(RoundedCornerShape(16.dp)).border(1.dp, p.line, RoundedCornerShape(16.dp))
-            .background(p.card).clickable(onClick = onClick).padding(vertical = 16.dp),
-    )
+    Column(Modifier.fillMaxWidth().padding(20.dp)) {
+        Text("다른 곳에서도 찾아보기", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = p.ink)
+        Spacer(Modifier.height(3.dp))
+        Text("다나와에 없는 상품은 네이버쇼핑에 있는 경우가 많아요", fontSize = 12.5.sp, color = p.sub)
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "N  네이버쇼핑에서 보기", fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1.4f).clip(RoundedCornerShape(14.dp)).background(Color(0xFF03C75A))
+                    .clickable { open(naverShoppingUrl(q)) }.padding(vertical = 15.dp),
+            )
+            Text(
+                "다나와  ↗", fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = p.ink, textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).border(1.dp, p.line, RoundedCornerShape(14.dp))
+                    .background(p.card).clickable { open(danawaSearchUrl(q)) }.padding(vertical = 15.dp),
+            )
+        }
+    }
 }
 
 /** 우리 핫딜 데이터에 같은 제품 딜이 있으면 그 딜 */

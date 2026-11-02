@@ -111,7 +111,7 @@ object DanawaParser {
         if (!html.contains("__next_f")) return emptyList()
         val payload = buildString {
             for (raw in pushedStrings(html)) {
-                runCatching { append(JSON.decodeFromString<String>("\"" + raw + "\"")) }
+                append(unescapeJsonString(raw))
             }
         }
         val out = mutableListOf<LiveProduct>()
@@ -167,6 +167,33 @@ object DanawaParser {
             from = i + 1
         }
         return out
+    }
+
+    /** JSON 문자열 안의 \" \\ \n \uXXXX 같은 표기를 글자로 되돌린다 (라이브러리 없이 직접) */
+    internal fun unescapeJsonString(s: String): String {
+        if ('\\' !in s) return s
+        val sb = StringBuilder(s.length)
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            if (c != '\\' || i + 1 >= s.length) { sb.append(c); i++; continue }
+            when (val n = s[i + 1]) {
+                'n' -> sb.append('\n')
+                't' -> sb.append('\t')
+                'r' -> sb.append('\r')
+                'b' -> sb.append('\b')
+                'f' -> sb.append('\u000C')
+                'u' -> {
+                    val hex = s.substring(i + 2, minOf(i + 6, s.length))
+                    val code = hex.toIntOrNull(16)
+                    if (hex.length == 4 && code != null) { sb.append(code.toChar()); i += 6; continue }
+                    sb.append(n)
+                }
+                else -> sb.append(n) // \" \\ \/
+            }
+            i += 2
+        }
+        return sb.toString()
     }
 
     /** 문자열 안의 괄호는 건너뛰며 { … } 의 끝 위치를 찾는다 */
