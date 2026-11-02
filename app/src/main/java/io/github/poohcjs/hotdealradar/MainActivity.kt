@@ -41,7 +41,10 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -122,8 +125,18 @@ fun App(
     val favs by vm.favs.collectAsStateWithLifecycle()
     val liveSearch by vm.liveSearch.collectAsStateWithLifecycle()
     val livePages by vm.livePages.collectAsStateWithLifecycle()
-    var tab by rememberSaveable { mutableStateOf(Tab.DEALS) }
-    val stack = remember { mutableStateListOf<String>() } // 열린 상세 화면들 (항목 key)
+    // 보던 화면 유지: 탭·열린 상세 화면을 화면 회전·앱 정리 뒤에도 되살리고(rememberSaveable),
+    // 앱을 완전히 닫았어도 30분 안에 다시 열면 이어서 보여 준다(restoredNav)
+    var tab by rememberSaveable { mutableStateOf(vm.restoredNav?.first?.let { n -> Tab.entries.firstOrNull { it.name == n } } ?: Tab.DEALS) }
+    val stack = rememberSaveable(saver = listSaver<SnapshotStateList<String>, String>(save = { it.toList() }, restore = { it.toMutableStateList() })) {
+        vm.restoredNav?.second.orEmpty().toMutableStateList()
+    } // 열린 상세 화면들 (항목 key)
+    val screens = rememberSaveableStateHolder() // 탭·상세 화면마다 스크롤 위치를 따로 기억
+    fun pop() {
+        if (stack.isEmpty()) return
+        screens.removeState("d:" + stack.removeAt(stack.lastIndex))
+    }
+    LaunchedEffect(tab, stack.toList()) { vm.saveNav(tab.name, stack.toList()) }
 
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     fun askNotify() {
@@ -150,7 +163,11 @@ fun App(
             tab = Tab.SEARCH
         }
     }
-    BackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
+    BackHandler(enabled = stack.isNotEmpty()) { pop() }
+    // 데이터가 바뀌어 사라진 딜을 가리키고 있으면 닫는다 (빈 화면에 갇히지 않게)
+    LaunchedEffect(index, stack.toList()) {
+        if (index != null) while (stack.isNotEmpty() && !stack.last().startsWith("live:") && index.find(stack.last()) == null) pop()
+    }
 
     val reachedCount = if (index != null) favs.keys.count { targetReached(it, favs, index) } else 0
 
@@ -161,27 +178,31 @@ fun App(
         val detailKey = stack.lastOrNull()
         if (detailKey != null && detailKey.startsWith("live:")) {
             val pcode = detailKey.removePrefix("live:")
-            LiveProductScreen(
-                pcode = pcode, product = vm.liveProducts[pcode], state = livePages[pcode], index = index, favs = favs,
-                contentPadding = padding, onLoad = vm::loadLivePage, onBack = { stack.removeAt(stack.lastIndex) },
-                onOption = { stack[stack.lastIndex] = "live:$it" },
-                onFav = { name, price, image -> vm.toggleFavLive(pcode, name, price, image) },
-                onOpenDeal = { stack.add(it.key) },
-                withShipping = s.liveWithShipping,
-            )
+            screens.SaveableStateProvider("d:$detailKey") {
+                LiveProductScreen(
+                    pcode = pcode, product = vm.liveProducts[pcode], state = livePages[pcode], index = index, favs = favs,
+                    contentPadding = padding, onLoad = vm::loadLivePage, onBack = ::pop,
+                    onOption = { stack[stack.lastIndex] = "live:$it" },
+                    onFav = { name, price, image -> vm.toggleFavLive(pcode, name, price, image) },
+                    onOpenDeal = { stack.add(it.key) },
+                    withShipping = s.liveWithShipping,
+                )
+            }
             return@Scaffold
         }
         val detail = detailKey?.let { index?.find(it) }
         if (detail != null && index != null) {
-            DetailScreen(
-                x = detail, index = index, s = s, favs = favs, contentPadding = padding,
-                onBack = { stack.removeAt(stack.lastIndex) }, onFav = vm::toggleFav, onTarget = vm::setTarget,
-                onOpen = { stack.add(it.key) },
-            )
+            screens.SaveableStateProvider("d:$detailKey") {
+                DetailScreen(
+                    x = detail, index = index, s = s, favs = favs, contentPadding = padding,
+                    onBack = ::pop, onFav = vm::toggleFav, onTarget = vm::setTarget,
+                    onOpen = { stack.add(it.key) },
+                )
+            }
             return@Scaffold
         }
         if (tab == Tab.SETTINGS) {
-            SettingsScreen(index, s, padding, vm::updateSettings, ::askNotify)
+            screens.SaveableStateProvider("t:SETTINGS") { SettingsScreen(index, s, padding, vm::updateSettings, ::askNotify) }
             return@Scaffold
         }
         PullToRefreshBox(isRefreshing = state.loading && index != null, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -216,7 +237,7 @@ fun App(
                         )
                     }
                     val pad = PaddingValues(0.dp)
-                    when (tab) {
+                    screens.SaveableStateProvider("t:${tab.name}") { when (tab) {
                         Tab.DEALS -> DealsScreen(index, s, favs, vm.newCutoff, vm.firstVisit, pad, { stack.add(it.key) }, vm::toggleFav)
                         Tab.COMMUNITY -> CommunityScreen(index, s, pad, { v -> vm.updateSettings { it.copy(hideEnded = v) } }) { stack.add(it.key) }
                         Tab.SEARCH -> SearchScreen(
@@ -230,7 +251,7 @@ fun App(
                             if (index.find(item.key) != null) stack.add(item.key) else item.pcode?.let { stack.add("live:$it") }
                         }, { item -> if (index.find(item.key) != null) vm.toggleFav(item) else item.pcode?.let { vm.toggleFavLive(it, item.name, item.price, item.image) } })
                         Tab.SETTINGS -> Unit
-                    }
+                    } }
                 }
             }
         }

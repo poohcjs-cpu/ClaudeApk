@@ -142,6 +142,11 @@ fun SearchScreen(
         focus.clearFocus()
     }
 
+    // 앱이 정리됐다 다시 열려 검색 결과가 사라졌으면 같은 검색어로 다시 찾는다 (보던 화면 유지)
+    LaunchedEffect(Unit) {
+        if (submitted.isNotEmpty() && live.query != submitted && !live.loading && incomingQuery == null) onSearchLive(submitted)
+    }
+
     // 다른 앱에서 '공유 → 핫딜 레이더'로 들어온 상품명
     LaunchedEffect(incomingQuery) {
         val t = incomingQuery?.let { queryFromShared(it) }

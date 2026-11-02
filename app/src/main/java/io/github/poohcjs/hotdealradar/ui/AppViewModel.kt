@@ -157,6 +157,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 30분 안에 보던 화면이 있으면 그대로 (앱이 정리됐다 다시 열렸을 때) */
+    val restoredNav: Pair<String, List<String>>? = prefs.loadNav(30 * 60_000L)
+
+    fun saveNav(tab: String, stack: List<String>) = prefs.saveNav(tab, stack)
+
     fun markVisit() {
         prefs.lastVisit = System.currentTimeMillis()
     }

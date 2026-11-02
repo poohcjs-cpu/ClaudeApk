@@ -9,7 +9,7 @@ import io.github.poohcjs.hotdealradar.data.Prefs
 import io.github.poohcjs.hotdealradar.data.Repository
 import io.github.poohcjs.hotdealradar.work.DealCheckWorker
 
-class HotdealApp : Application(), SingletonImageLoader.Factory {
+open class HotdealApp : Application(), SingletonImageLoader.Factory {
     lateinit var prefs: Prefs
         private set
     lateinit var repository: Repository

@@ -78,7 +78,7 @@ android {
                 if (!project.hasProperty("screenshots")) test.exclude("**/ScreenshotTest*")
                 // 실제 다나와에 물어보는 확인은 -Plive 를 줄 때만
                 if (!project.hasProperty("live")) test.exclude("**/LiveNetworkTest*")
-                test.testLogging { showStandardStreams = project.hasProperty("live") }
+                test.testLogging { showStandardStreams = project.hasProperty("live") || project.hasProperty("verbose") }
                 test.systemProperty("screenshots.dir", layout.buildDirectory.dir("screenshots").get().asFile.absolutePath)
             }
         }
@@ -116,6 +116,7 @@ dependencies {
     implementation(libs.coil.network)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.work.testing)
     testImplementation(platform(libs.compose.bom))
     testImplementation(libs.compose.ui.test.junit4)
     debugImplementation(libs.compose.ui.test.manifest)

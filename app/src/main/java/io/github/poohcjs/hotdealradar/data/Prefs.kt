@@ -113,6 +113,16 @@ class Prefs(context: Context) {
             ?: emptyMap()
         set(v) = sp.edit { putString(K_TARGET_NOTIFIED, JSON.encodeToString(MapSerializer(String.serializer(), Long.serializer()), v)) }
 
+    /** 마지막으로 보던 화면 (탭 + 열린 상세 화면들). 앱이 정리됐다 다시 열려도 이어서 보여 주려고 */
+    fun saveNav(tab: String, stack: List<String>) =
+        sp.edit { putString(K_NAV, (listOf(tab) + stack).joinToString("\n")); putLong(K_NAV_AT, System.currentTimeMillis()) }
+
+    fun loadNav(maxAgeMs: Long): Pair<String, List<String>>? {
+        if (System.currentTimeMillis() - sp.getLong(K_NAV_AT, 0L) > maxAgeMs) return null
+        val parts = sp.getString(K_NAV, null)?.split('\n')?.filter { it.isNotBlank() } ?: return null
+        return parts.firstOrNull()?.let { it to parts.drop(1) }
+    }
+
     var recentSearches: List<String>
         get() = sp.getString(K_RECENT, null)?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
         set(v) = sp.edit { putString(K_RECENT, v.take(8).joinToString("\n")) }
@@ -125,5 +135,7 @@ class Prefs(context: Context) {
         private const val K_NOTIFIED = "notified"
         private const val K_TARGET_NOTIFIED = "targetNotified"
         private const val K_RECENT = "recentSearches"
+        private const val K_NAV = "nav"
+        private const val K_NAV_AT = "navAt"
     }
 }
