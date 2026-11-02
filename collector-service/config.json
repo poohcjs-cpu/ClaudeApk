@@ -54,7 +54,7 @@
   "danawa": {
     "enabled": true,
     "min_delay_seconds": 10,
-    "max_verifications_per_run": 15,
+    "max_verifications_per_run": 20,
     "max_product_pages_per_run": 20,
     "products_per_keyword": 6,
     "keyword_refresh_hours": 24,

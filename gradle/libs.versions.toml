@@ -11,6 +11,7 @@ coroutines = "1.11.0"
 coil = "3.6.3"
 okhttp = "5.5.1"
 junit = "4.13.2"
+jsoup = "1.23.2"
 robolectric = "4.17"
 
 [libraries]
@@ -31,6 +32,7 @@ coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" 
 coil-network = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 junit = { module = "junit:junit", version.ref = "junit" }
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
 compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }

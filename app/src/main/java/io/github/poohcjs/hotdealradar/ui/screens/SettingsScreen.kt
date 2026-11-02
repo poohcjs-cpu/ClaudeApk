@@ -101,7 +101,7 @@ fun SettingsScreen(
         }
 
         Group("알림") {
-            ToggleRow("새 핫딜 알림", "30분마다 확인해요. 배터리 절약 모드에서는 늦어질 수 있어요", s.notify) { v ->
+            ToggleRow("새 핫딜 알림", "1시간마다 확인해요. 배터리 절약 모드에서는 늦어질 수 있어요", s.notify) { v ->
                 if (v) onAskNotificationPermission()
                 onChange { it.copy(notify = v) }
             }
@@ -192,7 +192,7 @@ fun SettingsScreen(
         }
 
         Text(
-            "핫딜 레이더 ${BuildConfig.VERSION_NAME}\n데이터는 GitHub Actions에서 30분마다 모아요. 찜·설정은 이 기기에만 저장돼요.\n글꼴: HDR Sans (Pretendard 기반, SIL OFL 1.1)",
+            "핫딜 레이더 ${BuildConfig.VERSION_NAME}\n핫딜 데이터는 GitHub Actions에서 1시간마다 모으고, 검색은 다나와에 실시간으로 물어요. 찜·설정은 이 기기에만 저장돼요.\n글꼴: HDR Sans (Pretendard 기반, SIL OFL 1.1)",
             fontSize = 12.sp, lineHeight = 18.sp, color = p.faint, modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp),
         )
     }

@@ -58,6 +58,7 @@ import io.github.poohcjs.hotdealradar.ui.components.EmptyNote
 import io.github.poohcjs.hotdealradar.ui.screens.CommunityScreen
 import io.github.poohcjs.hotdealradar.ui.screens.DealsScreen
 import io.github.poohcjs.hotdealradar.ui.screens.DetailScreen
+import io.github.poohcjs.hotdealradar.ui.screens.LiveProductScreen
 import io.github.poohcjs.hotdealradar.ui.screens.SavedScreen
 import io.github.poohcjs.hotdealradar.ui.screens.SearchScreen
 import io.github.poohcjs.hotdealradar.ui.screens.SettingsScreen
@@ -107,6 +108,8 @@ fun App(vm: AppViewModel, pendingItem: androidx.compose.runtime.MutableState<Str
     val state by vm.state.collectAsStateWithLifecycle()
     val s by vm.settings.collectAsStateWithLifecycle()
     val favs by vm.favs.collectAsStateWithLifecycle()
+    val liveSearch by vm.liveSearch.collectAsStateWithLifecycle()
+    val livePages by vm.livePages.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(Tab.DEALS) }
     val stack = remember { mutableStateListOf<String>() } // 열린 상세 화면들 (항목 key)
 
@@ -135,6 +138,17 @@ fun App(vm: AppViewModel, pendingItem: androidx.compose.runtime.MutableState<Str
         bottomBar = { if (stack.isEmpty()) BottomBar(tab, reachedCount) { tab = it } },
     ) { padding ->
         val detailKey = stack.lastOrNull()
+        if (detailKey != null && detailKey.startsWith("live:")) {
+            val pcode = detailKey.removePrefix("live:")
+            LiveProductScreen(
+                pcode = pcode, product = vm.liveProducts[pcode], state = livePages[pcode], index = index, favs = favs,
+                contentPadding = padding, onLoad = vm::loadLivePage, onBack = { stack.removeAt(stack.lastIndex) },
+                onOption = { stack[stack.lastIndex] = "live:$it" },
+                onFav = { name, price, image -> vm.toggleFavLive(pcode, name, price, image) },
+                onOpenDeal = { stack.add(it.key) },
+            )
+            return@Scaffold
+        }
         val detail = detailKey?.let { index?.find(it) }
         if (detail != null && index != null) {
             DetailScreen(
@@ -183,8 +197,14 @@ fun App(vm: AppViewModel, pendingItem: androidx.compose.runtime.MutableState<Str
                     when (tab) {
                         Tab.DEALS -> DealsScreen(index, s, favs, vm.newCutoff, vm.firstVisit, pad, { stack.add(it.key) }, vm::toggleFav)
                         Tab.COMMUNITY -> CommunityScreen(index, s, pad, { v -> vm.updateSettings { it.copy(hideEnded = v) } }) { stack.add(it.key) }
-                        Tab.SEARCH -> SearchScreen(index, s, favs, vm.recentSearches, { vm.recentSearches = it }, pad, { stack.add(it.key) }, vm::toggleFav)
-                        Tab.SAVED -> SavedScreen(index, s, favs, pad, { stack.add(it.key) }, vm::toggleFav)
+                        Tab.SEARCH -> SearchScreen(
+                            index, s, favs, vm.recentSearches, { vm.recentSearches = it }, liveSearch, vm::searchLive,
+                            { stack.add("live:$it") }, pad, { stack.add(it.key) }, vm::toggleFav,
+                        )
+                        Tab.SAVED -> SavedScreen(index, s, favs, pad, { item ->
+                            // 실시간 검색에서 찜한 제품처럼 모아 둔 데이터에 없으면 실시간 화면으로
+                            if (index.find(item.key) != null) stack.add(item.key) else item.pcode?.let { stack.add("live:$it") }
+                        }, { item -> if (index.find(item.key) != null) vm.toggleFav(item) else item.pcode?.let { vm.toggleFavLive(it, item.name, item.price, item.image) } })
                         Tab.SETTINGS -> Unit
                     }
                 }

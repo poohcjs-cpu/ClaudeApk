@@ -25,6 +25,11 @@ import io.github.poohcjs.hotdealradar.ui.screens.DealsScreen
 import io.github.poohcjs.hotdealradar.ui.screens.DetailScreen
 import io.github.poohcjs.hotdealradar.ui.screens.SavedScreen
 import io.github.poohcjs.hotdealradar.ui.screens.SettingsScreen
+import io.github.poohcjs.hotdealradar.ui.screens.SearchScreen
+import io.github.poohcjs.hotdealradar.ui.screens.LiveProductScreen
+import io.github.poohcjs.hotdealradar.ui.LiveSearchState
+import io.github.poohcjs.hotdealradar.ui.LivePageState
+import io.github.poohcjs.hotdealradar.data.DanawaParser
 import io.github.poohcjs.hotdealradar.ui.theme.HD
 import io.github.poohcjs.hotdealradar.ui.theme.HotdealTheme
 import org.junit.Rule
@@ -107,6 +112,29 @@ class ScreenshotTest {
 
     @Test fun saved() = shot("4_saved", withBar = Tab.SAVED) {
         SavedScreen(index, s, favs, none, {}, {})
+    }
+
+    private fun res(name: String) = javaClass.classLoader!!.getResource(name)!!.readText()
+
+    @Test @Config(qualifiers = "w400dp-h1900dp-xxhdpi")
+    fun searchLive() = shot("6_search_live", withBar = Tab.SEARCH) {
+        val list = DanawaParser.parseSearch(res("danawa_search_toilet.html"))
+        SearchScreen(
+            index, s, favs, listOf("에어팟"), {}, LiveSearchState("화장지", false, list, null, System.currentTimeMillis()), {}, {},
+            none, {}, {},
+        )
+    }
+
+    @Test fun searchEmpty() = shot("6_search_empty", withBar = Tab.SEARCH) {
+        SearchScreen(index, s, favs, listOf("에어팟", "생수 2L"), {}, LiveSearchState(), {}, {}, none, {}, {})
+    }
+
+    @Test @Config(qualifiers = "w400dp-h2000dp-xxhdpi")
+    fun liveProduct() = shot("7_live_product") {
+        val list = DanawaParser.parseSearch(res("danawa_search_toilet.html"))
+        val page = DanawaParser.parseProduct(res("danawa_product.html"), "18297722")
+        LiveProductScreen("16816127", list.first { it.pcode == "16816127" }, LivePageState(false, page, null), index, favs, none,
+            { _, _ -> }, {}, {}, { _, _, _ -> }, {})
     }
 
     @Test @Config(qualifiers = "w400dp-h2600dp-xxhdpi")

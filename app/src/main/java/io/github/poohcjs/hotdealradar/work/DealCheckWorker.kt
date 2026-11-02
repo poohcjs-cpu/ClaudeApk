@@ -33,8 +33,8 @@ import io.github.poohcjs.hotdealradar.data.won
 import java.util.concurrent.TimeUnit
 
 /**
- * 30분마다 deals.json을 받아 새 핫딜과 찜 목표가 도달을 알림으로 보낸다.
- * 수집기(GitHub Actions)도 30분마다 돌기 때문에 이보다 자주 받을 이유가 없다.
+ * 1시간마다 deals.json을 받아 새 핫딜과 찜 목표가 도달을 알림으로 보낸다.
+ * 수집기(GitHub Actions)도 1시간마다 돌기 때문에 이보다 자주 받을 이유가 없다.
  */
 class DealCheckWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
@@ -163,10 +163,11 @@ class DealCheckWorker(context: Context, params: WorkerParameters) : CoroutineWor
                 wm.cancelUniqueWork(UNIQUE)
                 return
             }
-            val req = PeriodicWorkRequestBuilder<DealCheckWorker>(30, TimeUnit.MINUTES, 10, TimeUnit.MINUTES)
+            val req = PeriodicWorkRequestBuilder<DealCheckWorker>(60, TimeUnit.MINUTES, 15, TimeUnit.MINUTES)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .build()
-            wm.enqueueUniquePeriodicWork(UNIQUE, ExistingPeriodicWorkPolicy.KEEP, req)
+            // UPDATE: 예전 버전이 등록한 30분 주기도 새 주기로 바꾼다
+            wm.enqueueUniquePeriodicWork(UNIQUE, ExistingPeriodicWorkPolicy.UPDATE, req)
         }
     }
 }

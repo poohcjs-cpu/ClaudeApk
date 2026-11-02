@@ -1,10 +1,11 @@
 name: 핫딜 수집
 
-# 30분마다 커뮤니티 핫딜을 모아 다나와 가격과 비교하고, 앱이 읽는 deals.json을 'data' 브랜치에 올려요.
+# 1시간마다 커뮤니티 핫딜을 모아 다나와 가격과 비교하고, 앱이 읽는 deals.json을 'data' 브랜치에 올려요.
+# (GitHub의 예약 실행은 붐빌 때 늦어지거나 건너뛸 수 있어요. 정시(0분)를 피하면 덜 밀려요.)
 # 앱 주소: https://raw.githubusercontent.com/poohcjs-cpu/ClaudeApk/data/deals.json
 on:
   schedule:
-    - cron: "22,52 * * * *"
+    - cron: "23 * * * *"
   workflow_dispatch: {}
 
 permissions:

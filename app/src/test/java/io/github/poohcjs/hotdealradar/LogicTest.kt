@@ -96,7 +96,7 @@ class LogicTest {
 
     @Test fun tiedWithAnotherMallIsNotHot() {
         // 다른 쇼핑몰도 같은 값에 파는 딜(2위와 차이 없음)은 평균보다 싸도 핫딜이 아니다
-        val tie = index.deals.first { it.vsBest != null && it.vsBest!! < 1.0 && (it.rate ?: 0.0) >= 10 }
+        val tie = index.deals.first { (it.vsBest ?: 99.0) < 1.0 && (it.rate ?: 0.0) >= 10 }
         assertFalse(isHot(tie, Settings()))
         assertTrue(isHot(tie, Settings(onlyCheapest = false)))
         val clear = index.deals.first { (it.vsBest ?: 0.0) >= 1.0 && (it.rate ?: 0.0) >= 10 }

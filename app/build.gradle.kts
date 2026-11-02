@@ -74,6 +74,9 @@ android {
             all { test ->
                 // 화면 그림 테스트(ScreenshotTest)는 -Pscreenshots 를 줄 때만 돈다
                 if (!project.hasProperty("screenshots")) test.exclude("**/ScreenshotTest*")
+                // 실제 다나와에 물어보는 확인은 -Plive 를 줄 때만
+                if (!project.hasProperty("live")) test.exclude("**/LiveNetworkTest*")
+                test.testLogging { showStandardStreams = project.hasProperty("live") }
                 test.systemProperty("screenshots.dir", layout.buildDirectory.dir("screenshots").get().asFile.absolutePath)
             }
         }
@@ -106,6 +109,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
+    implementation(libs.jsoup)
     implementation(libs.coil.compose)
     implementation(libs.coil.network)
     testImplementation(libs.junit)
