@@ -33,7 +33,12 @@ data class LiveOption(
     val price: Long,
     val malls: Int?,
     val unit: UnitPrice?,
-)
+    /** 배송비 포함 최저가 (다나와가 따로 알려 줄 때) */
+    val total: Long? = null,
+) {
+    fun cost(withShipping: Boolean) = if (withShipping) total ?: price else price
+    fun unitFor(withShipping: Boolean) = unit?.scaled(price, cost(withShipping))
+}
 
 /** '98원/10m' → 98원 per '10m'. estimated: 다나와가 준 값이 아니라 상품 이름의 용량·개수로 계산한 값 */
 data class UnitPrice(val text: String, val value: Long, val per: String, val estimated: Boolean = false) {
@@ -68,6 +73,13 @@ data class UnitPrice(val text: String, val value: Long, val per: String, val est
             return UnitPrice("${v}원/$per", v, per, estimated = true)
         }
     }
+
+    /** 배송비를 더한 값으로 단가를 다시 계산 (단가는 상품가 기준이라 같은 비율로 늘린다) */
+    fun scaled(price: Long, cost: Long): UnitPrice {
+        if (cost == price || price <= 0) return this
+        val v = Math.round(value.toDouble() * cost / price)
+        return copy(text = "${v}원/$per", value = v)
+    }
 }
 
 data class LiveProduct(
@@ -86,14 +98,28 @@ data class LiveProduct(
     /** 개별 상품의 쇼핑몰 바로가기 (다나와 연결 주소) */
     val link: String = "",
     val shippingFee: Long? = null,
+    /** 배송비 포함 최저가 */
+    val total: Long? = null,
+    /** 다나와 분류의 마지막 단계 (예: '치약', '칫솔/치실') */
+    val category: String = "",
 ) {
     val isListing: Boolean get() = mall != null
+    fun cost(withShipping: Boolean) = if (withShipping) total ?: price else price
+    fun unitFor(withShipping: Boolean) = unit?.scaled(price, cost(withShipping))
 
     /** 단가가 가장 낮은 옵션 (단가 정보가 없으면 null) */
-    val bestUnitOption: LiveOption? get() = options.filter { it.unit != null }.minByOrNull { it.unit!!.value }
+    val bestUnitOption: LiveOption? get() = bestUnitOption(false)
+    fun bestUnitOption(withShipping: Boolean): LiveOption? =
+        options.filter { it.unit != null }.minByOrNull { it.unitFor(withShipping)!!.value }
 }
 
-data class LiveOffer(val mall: String, val price: Long, val shipping: String, val fee: Long?, val link: String)
+data class LiveOffer(val mall: String, val price: Long, val shipping: String, val fee: Long?, val link: String) {
+    /** 배송비 포함 금액 (배송비를 모르면 상품가) */
+    val total: Long get() = price + (fee ?: 0)
+}
+
+/** '현대카드 결제 시' 처럼 특정 카드로 결제해야 나오는 값 (판매가와 따로 참고용으로) */
+data class CardOffer(val mall: String, val price: Long, val condition: String, val link: String)
 
 data class LivePage(
     val pcode: String,
@@ -102,22 +128,37 @@ data class LivePage(
     val lowest: Long?,
     val offerCount: Int?,
     val offers: List<LiveOffer>,
+    val cardOffers: List<CardOffer> = emptyList(),
 )
 
 class LiveBlocked(message: String) : IOException(message)
 
 enum class LiveSort(val label: String) { UNIT("단가 낮은 순"), PRICE("가격 낮은 순"), RANK("다나와 추천순") }
 
+/** 정렬에 맞는 대표 옵션: 단가순이면 단가가 가장 낮은 묶음, 가격순이면 가장 싼 묶음 */
+fun pickOption(p: LiveProduct, sort: LiveSort, withShipping: Boolean = false): LiveOption? = when (sort) {
+    LiveSort.UNIT -> p.bestUnitOption(withShipping) ?: p.options.minByOrNull { it.cost(withShipping) }
+    LiveSort.PRICE -> p.options.minByOrNull { it.cost(withShipping) }
+    LiveSort.RANK -> p.options.firstOrNull { it.pcode == p.pcode } ?: p.options.minByOrNull { it.cost(withShipping) }
+}
+
+/** 화면에 보여 줄 값: 대표 옵션이 있으면 그 옵션, 없으면 상품 자체 */
+fun shownCost(p: LiveProduct, sort: LiveSort, withShipping: Boolean): Long =
+    pickOption(p, sort, withShipping)?.cost(withShipping) ?: p.cost(withShipping)
+
+fun shownUnit(p: LiveProduct, sort: LiveSort, withShipping: Boolean): UnitPrice? =
+    pickOption(p, sort, withShipping)?.unitFor(withShipping) ?: p.unitFor(withShipping)
+
 /** 단가순: 가장 흔한 단위(예: 10m)끼리 단가로 줄 세우고, 단위가 다르거나 없는 것은 그 뒤에 가격순 */
-fun sortLive(list: List<LiveProduct>, sort: LiveSort): List<LiveProduct> = when (sort) {
-    LiveSort.PRICE -> list.sortedBy { it.price }
+fun sortLive(list: List<LiveProduct>, sort: LiveSort, withShipping: Boolean = false): List<LiveProduct> = when (sort) {
+    LiveSort.PRICE -> list.sortedBy { shownCost(it, sort, withShipping) }
     LiveSort.RANK -> list.sortedBy { it.rank }
     LiveSort.UNIT -> {
-        val unitOf = { p: LiveProduct -> (p.bestUnitOption?.unit ?: p.unit) }
+        val unitOf = { p: LiveProduct -> shownUnit(p, sort, withShipping) }
         val common = list.mapNotNull { unitOf(it)?.per }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
         list.sortedWith(
             compareBy<LiveProduct> { if (common != null && unitOf(it)?.per == common) 0 else 1 }
-                .thenBy { if (common != null && unitOf(it)?.per == common) unitOf(it)!!.value else it.price },
+                .thenBy { if (common != null && unitOf(it)?.per == common) unitOf(it)!!.value else shownCost(it, sort, withShipping) },
         )
     }
 }
@@ -131,6 +172,9 @@ object DanawaParser {
     private val TAG = Regex("<[^>]+>")
     private val USED = listOf("중고", "리퍼", "전시", "반품", "B급")
     private val OVERSEAS = listOf("해외구매", "해외직구", "병행수입", "직구")
+
+    private fun categoryOf(obj: JsonObject): String =
+        (obj["categoryNameList"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim() }?.lastOrNull { it.isNotEmpty() }.orEmpty()
 
     private fun plain(s: String?): String =
         org.jsoup.parser.Parser.unescapeEntities(TAG.replace(s.orEmpty(), ""), false).replace(Regex("\\s+"), " ").trim()
@@ -170,20 +214,26 @@ object DanawaParser {
                     options = emptyList(), used = USED.any { it in name }, overseas = OVERSEAS.any { it in name }, rank = out.size,
                     mall = normalizeMall(obj.str("shopName").orEmpty().ifBlank { "쇼핑몰" }), link = link,
                     shippingFee = obj.long("postPrice"),
+                    total = (obj.long("totalPrice")?.takeIf { it > price } ?: obj.long("postPrice")?.let { price + it }),
+                    category = categoryOf(obj),
                 )
                 continue
             }
             val bundle = plain(obj.str("bundleName"))
             val unit = UnitPrice.parse(obj.str("unitPrice")) ?: UnitPrice.estimate("$name $bundle", price)
             val options = mutableListOf<LiveOption>()
-            if (bundle.isNotEmpty()) options += LiveOption(pcode, bundle, price, obj.long("shopCount")?.toInt(), unit)
+            val total = obj.long("totalPrice")?.takeIf { it >= price }
+            if (bundle.isNotEmpty()) options += LiveOption(pcode, bundle, price, obj.long("shopCount")?.toInt(), unit, total)
             (obj["bundleList"] as? JsonArray)?.forEach { b ->
                 val bo = b as? JsonObject ?: return@forEach
                 val bp = bo.str("productSeq") ?: return@forEach
                 val bprice = bo.long("minPrice") ?: return@forEach
                 if (bp != pcode && bprice > 0 && options.none { it.pcode == bp }) {
                     val bl = plain(bo.str("bundleName"))
-                    options += LiveOption(bp, bl, bprice, bo.long("shopCount")?.toInt(), UnitPrice.parse(bo.str("unitPrice")) ?: UnitPrice.estimate("$name $bl", bprice))
+                    options += LiveOption(
+                        bp, bl, bprice, bo.long("shopCount")?.toInt(), UnitPrice.parse(bo.str("unitPrice")) ?: UnitPrice.estimate("$name $bl", bprice),
+                        bo.long("totalPrice")?.takeIf { it >= bprice },
+                    )
                 }
             }
             out += LiveProduct(
@@ -191,6 +241,7 @@ object DanawaParser {
                 price = price, malls = obj.long("shopCount")?.toInt(), unit = unit,
                 options = options.sortedBy { it.price },
                 used = USED.any { it in name }, overseas = OVERSEAS.any { it in name }, rank = out.size,
+                total = total, category = categoryOf(obj),
             )
         }
         return out
@@ -291,9 +342,22 @@ object DanawaParser {
         if (image.startsWith("//")) image = "https:$image"
 
         val best = LinkedHashMap<String, LiveOffer>()
+        val cards = LinkedHashMap<String, CardOffer>()
         for (row in doc.select("li.list-item")) {
             if (row.selectFirst(".box__logo, [class*=logo]") == null) continue
-            if (row.parents().any { it.hasClass("list__membership") }) continue // '○○카드 결제 시' 가격
+            if (row.parents().any { it.hasClass("list__membership") }) {
+                // '○○카드 결제 시' 가격: 판매가 비교에서는 빼고 참고용으로 따로 모은다
+                val mall = mallOf(row)
+                val price = row.selectFirst(".text__discount-price")?.text()?.digits()
+                    ?: Regex("""(\d{1,3}(?:,\d{3})+)\s*원""").findAll(row.text()).lastOrNull()?.groupValues?.get(1)?.digits()
+                val cond = row.selectFirst(".box__desc-wrap")?.text()?.trim().orEmpty().ifBlank { "카드 결제 시" }
+                if (mall.isNotBlank() && price != null && price >= 100) {
+                    val link = row.selectFirst("a.link__full-cover, a[href*=bridge]")?.absUrl("href").orEmpty()
+                    val key = "$mall|$cond"
+                    if ((cards[key]?.price ?: Long.MAX_VALUE) > price) cards[key] = CardOffer(mall, price, cond, link)
+                }
+                continue
+            }
             val mall = mallOf(row)
             if (mall.isBlank()) continue
             val price = priceOf(row) ?: continue
@@ -303,7 +367,10 @@ object DanawaParser {
             if (cur == null || price < cur.price) best[mall] = LiveOffer(mall, price, ship, fee, link)
         }
         val offers = best.values.sortedBy { it.price }
-        return LivePage(pcode, name, image, offers.firstOrNull()?.price?.let { p -> lowest?.let { minOf(it, p) } ?: p } ?: lowest, offerCount, offers)
+        return LivePage(
+            pcode, name, image, offers.firstOrNull()?.price?.let { p -> lowest?.let { minOf(it, p) } ?: p } ?: lowest, offerCount, offers,
+            cards.values.sortedBy { it.price },
+        )
     }
 
     private fun mallOf(row: Element): String {
@@ -342,12 +409,14 @@ class LiveSearchClient(private val client: OkHttpClient = defaultClient()) {
     private val gate = Mutex()
     private val lastAt = HashMap<String, Long>()
 
-    suspend fun search(query: String): List<LiveProduct> {
+    /** page: 1쪽부터. 한 쪽에 40개 안팎 */
+    suspend fun search(query: String, page: Int = 1): List<LiveProduct> {
         val q = query.trim()
-        searches[q]?.takeIf { fresh(it.at) }?.let { return it.value }
-        val html = get("https://search.danawa.com/?query=" + URLEncoder.encode(q, "UTF-8"))
-        val list = DanawaParser.parseSearch(html)
-        searches[q] = Cached(System.currentTimeMillis(), list)
+        val key = "$q#$page"
+        searches[key]?.takeIf { fresh(it.at) }?.let { return it.value }
+        val url = "https://search.danawa.com/?query=" + URLEncoder.encode(q, "UTF-8") + if (page > 1) "&page=$page" else ""
+        val list = DanawaParser.parseSearch(get(url))
+        searches[key] = Cached(System.currentTimeMillis(), list)
         return list
     }
 

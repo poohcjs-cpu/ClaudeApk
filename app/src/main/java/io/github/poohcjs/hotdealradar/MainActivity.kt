@@ -78,23 +78,31 @@ enum class Tab(val label: String, val icon: Int) {
 class MainActivity : ComponentActivity() {
     private val vm: AppViewModel by viewModels()
     private val pendingItem = mutableStateOf<String?>(null)
+    private val pendingShare = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         pendingItem.value = intent?.getStringExtra(EXTRA_ITEM)
-        setContent { HotdealTheme { App(vm, pendingItem) } }
+        pendingShare.value = sharedText(intent)
+        setContent { HotdealTheme { App(vm, pendingItem, pendingShare) } }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         intent.getStringExtra(EXTRA_ITEM)?.let { pendingItem.value = it }
+        sharedText(intent)?.let { pendingShare.value = it }
     }
 
     override fun onStop() {
         super.onStop()
         vm.markVisit()
     }
+
+    /** 다른 앱에서 '공유 → 핫딜 레이더'로 보낸 글 */
+    private fun sharedText(intent: Intent?): String? =
+        intent?.takeIf { it.action == Intent.ACTION_SEND && it.type?.startsWith("text/") == true }
+            ?.let { it.getStringExtra(Intent.EXTRA_TEXT) ?: it.getStringExtra(Intent.EXTRA_SUBJECT) }
 
     companion object {
         const val EXTRA_ITEM = "item"
@@ -103,7 +111,11 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun App(vm: AppViewModel, pendingItem: androidx.compose.runtime.MutableState<String?>) {
+fun App(
+    vm: AppViewModel,
+    pendingItem: androidx.compose.runtime.MutableState<String?>,
+    pendingShare: androidx.compose.runtime.MutableState<String?> = mutableStateOf(null),
+) {
     val p = HD.p
     val state by vm.state.collectAsStateWithLifecycle()
     val s by vm.settings.collectAsStateWithLifecycle()
@@ -124,9 +136,18 @@ fun App(vm: AppViewModel, pendingItem: androidx.compose.runtime.MutableState<Str
     val index = state.index
     LaunchedEffect(pendingItem.value, index) {
         val key = pendingItem.value
-        if (key != null && index != null) {
+        if (key != null && key.startsWith("live:")) {
+            stack.add(key)
+            pendingItem.value = null
+        } else if (key != null && index != null) {
             if (index.find(key) != null) stack.add(key)
             pendingItem.value = null
+        }
+    }
+    LaunchedEffect(pendingShare.value) {
+        if (pendingShare.value != null) {
+            stack.clear()
+            tab = Tab.SEARCH
         }
     }
     BackHandler(enabled = stack.isNotEmpty()) { stack.removeAt(stack.lastIndex) }
@@ -146,6 +167,7 @@ fun App(vm: AppViewModel, pendingItem: androidx.compose.runtime.MutableState<Str
                 onOption = { stack[stack.lastIndex] = "live:$it" },
                 onFav = { name, price, image -> vm.toggleFavLive(pcode, name, price, image) },
                 onOpenDeal = { stack.add(it.key) },
+                withShipping = s.liveWithShipping,
             )
             return@Scaffold
         }
@@ -200,6 +222,8 @@ fun App(vm: AppViewModel, pendingItem: androidx.compose.runtime.MutableState<Str
                         Tab.SEARCH -> SearchScreen(
                             index, s, favs, vm.recentSearches, { vm.recentSearches = it }, liveSearch, vm::searchLive,
                             { stack.add("live:$it") }, pad, { stack.add(it.key) }, vm::toggleFav,
+                            onSettings = vm::updateSettings, incomingQuery = pendingShare.value,
+                            onIncomingHandled = { pendingShare.value = null },
                         )
                         Tab.SAVED -> SavedScreen(index, s, favs, pad, { item ->
                             // 실시간 검색에서 찜한 제품처럼 모아 둔 데이터에 없으면 실시간 화면으로

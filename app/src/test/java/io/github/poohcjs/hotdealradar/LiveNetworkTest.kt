@@ -3,7 +3,7 @@ package io.github.poohcjs.hotdealradar
 import io.github.poohcjs.hotdealradar.data.LiveSearchClient
 import io.github.poohcjs.hotdealradar.data.LiveSort
 import io.github.poohcjs.hotdealradar.data.sortLive
-import io.github.poohcjs.hotdealradar.ui.screens.pickOption
+import io.github.poohcjs.hotdealradar.data.pickOption
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -38,5 +38,17 @@ class LiveNetworkTest {
         println("[닥터노아 치약] 결과 ${list.size}개 (쇼핑몰 개별 상품 ${list.count { it.isListing }}개)")
         sortLive(list, LiveSort.UNIT).take(5).forEach { println("   ${it.mall ?: "가격비교"} | ${it.name.take(40)} | ${it.price}원 | ${it.unit?.text}") }
         assertTrue(list.isNotEmpty())
+    }
+
+    @Test fun morePagesAndCardPrices() = runBlocking {
+        val c = LiveSearchClient()
+        val p1 = c.search("아기 치약", 1)
+        val p2 = c.search("아기 치약", 2)
+        val p3 = c.search("아기 치약", 3)
+        val all = (p1 + p2 + p3).map { it.pcode }.toSet()
+        println("[아기 치약 1~3쪽] ${p1.size} + ${p2.size} + ${p3.size} = 서로 다른 상품 ${all.size}개")
+        assertTrue(all.size > p1.size)
+        val page = c.product("18297722")
+        println("[990 PRO 카드 할인가] ${page.cardOffers.map { "${it.mall} ${it.price}원 (${it.condition})" }}")
     }
 }

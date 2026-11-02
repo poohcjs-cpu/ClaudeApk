@@ -30,6 +30,8 @@ import io.github.poohcjs.hotdealradar.data.Index
 import io.github.poohcjs.hotdealradar.data.Item
 import io.github.poohcjs.hotdealradar.data.ItemKind
 import io.github.poohcjs.hotdealradar.data.Settings
+import io.github.poohcjs.hotdealradar.data.ago
+import io.github.poohcjs.hotdealradar.data.currentBest
 import io.github.poohcjs.hotdealradar.data.targetReached
 import io.github.poohcjs.hotdealradar.data.won
 import io.github.poohcjs.hotdealradar.ui.components.EmptyNote
@@ -70,13 +72,13 @@ fun SavedScreen(
         item {
             ScreenTitle(
                 "찜",
-                "제품 단위로 찜해요. 상세 화면에서 목표가를 정하면, 진행 중인 딜과 다나와 최저가 중 싼 값이 목표가 아래로 내려올 때 알려 드려요.",
+                "제품 단위로 찜해요. 상세 화면에서 목표가를 정하면, 진행 중인 딜과 다나와 최저가 중 싼 값이 목표가 아래로 내려올 때 알려 드려요. 검색에서 찜한 제품도 앱이 3시간마다 다나와 가격을 확인해요.",
             )
         }
         if (entries.isEmpty()) item { EmptyNote("찜한 제품이 없어요", "핫딜 카드의 ♡를 눌러 찜해 보세요.", "💝") }
         items(entries, key = { it.key }) { (pcode, fav) ->
             val x = savedItem(index, pcode, fav)
-            val best = index.bestNow(pcode)
+            val best = currentBest(pcode, fav, index)
             val reached = targetReached(pcode, favs, index)
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp).cardBg(18.dp, 2.dp).clickable { onOpen(x) }.padding(14.dp),
@@ -97,6 +99,9 @@ fun SavedScreen(
                             }
                         } else {
                             Text("지금 가격 정보가 없어요", fontSize = 13.sp, color = p.faint)
+                        }
+                        if (fav.checkedAt > 0 && best?.via == "다나와 실시간") {
+                            Text("다나와에서 ${ago(fav.checkedAt)} 확인" + (fav.lowestSeen?.let { " · 찜한 뒤 최저 ${won(it)}원" } ?: ""), fontSize = 11.5.sp, color = p.faint)
                         }
                         val d = fav.savedPrice?.let { sp -> best?.price?.minus(sp) }
                         if (d != null && d != 0L) {

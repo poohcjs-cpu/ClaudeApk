@@ -72,6 +72,7 @@ fun LiveProductScreen(
     onOption: (String) -> Unit,
     onFav: (name: String, price: Long?, image: String) -> Unit,
     onOpenDeal: (Item) -> Unit,
+    withShipping: Boolean = true,
 ) {
     val p = HD.p
     val context = LocalContext.current
@@ -84,9 +85,10 @@ fun LiveProductScreen(
     val option = product?.options?.firstOrNull { it.pcode == pcode }
     val name = page?.name?.ifBlank { null } ?: product?.name.orEmpty()
     val image = page?.image?.ifBlank { null } ?: product?.image.orEmpty()
-    val offers = page?.offers.orEmpty()
+    // 배송비 포함으로 볼 때는 상품가+배송비 순서로 다시 줄 세운다
+    val offers = page?.offers.orEmpty().let { list -> if (withShipping) list.sortedBy { it.total } else list }
     val cheapest = offers.firstOrNull()
-    val price = cheapest?.price ?: option?.price ?: product?.price
+    val price = cheapest?.let { if (withShipping) it.total else it.price } ?: option?.cost(withShipping) ?: product?.cost(withShipping)
     val unit = option?.unit ?: product?.unit
     val danawaUrl = "https://prod.danawa.com/info/?pcode=$pcode"
     val deal = index?.dealsByPcode?.get(pcode)?.filter { !it.ended }?.minByOrNull { it.price ?: Long.MAX_VALUE }
@@ -112,7 +114,7 @@ fun LiveProductScreen(
                         Text(option.label, fontSize = 14.sp, color = p.sub)
                     }
                     Spacer(Modifier.height(16.dp))
-                    Text("지금 최저가", fontSize = 13.sp, color = p.sub)
+                    Text(if (withShipping) "지금 최저가 (배송비 포함)" else "지금 최저가", fontSize = 13.sp, color = p.sub)
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text(if (price != null) won(price) else "-", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = p.ink, letterSpacing = (-1).sp)
                         Text("원", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = p.ink, modifier = Modifier.padding(bottom = 3.dp))
@@ -131,8 +133,9 @@ fun LiveProductScreen(
                         fontSize = 13.5.sp, color = Good, fontWeight = FontWeight.SemiBold,
                     )
                     if (offers.size >= 2) {
-                        val avg = offers.map { it.price }.average().toLong()
-                        val save = avg - offers.first().price
+                        val v = { o: io.github.poohcjs.hotdealradar.data.LiveOffer -> if (withShipping) o.total else o.price }
+                        val avg = offers.map(v).average().toLong()
+                        val save = avg - v(offers.first())
                         if (save > 0) {
                             Spacer(Modifier.height(14.dp))
                             Row(
@@ -210,19 +213,45 @@ fun LiveProductScreen(
                         state.error != null && offers.isEmpty() -> Text(state.error, color = p.sub, fontSize = 13.5.sp, lineHeight = 19.sp)
                         offers.isEmpty() -> Text("판매처 목록을 읽지 못했어요. 다나와에서 직접 확인해 주세요.", color = p.sub, fontSize = 13.5.sp)
                         else -> {
-                            val min = offers.first().price
-                            val max = offers.last().price
-                            val avg = offers.map { it.price }.average().toLong()
+                            val v = { o: io.github.poohcjs.hotdealradar.data.LiveOffer -> if (withShipping) o.total else o.price }
+                            val min = offers.minOf(v)
+                            val max = offers.maxOf(v)
+                            val avg = offers.map(v).average().toLong()
                             offers.take(15).forEachIndexed { i, o ->
                                 Box(Modifier.clickable { open(o.link.ifBlank { danawaUrl }) }) {
-                                    MallPriceRow(if (i == 0) "👑 ${o.mall}" else o.mall, o.price, o.shipping, min, max, i == 0, avg)
+                                    MallPriceRow(
+                                        if (i == 0) "👑 ${o.mall}" else o.mall, v(o),
+                                        if (withShipping && (o.fee ?: 0) > 0) "상품 ${won(o.price)} + ${o.shipping}" else o.shipping,
+                                        min, max, i == 0, avg,
+                                    )
                                 }
                             }
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "쇼핑몰을 누르면 그 쇼핑몰 상품으로 가요 · 세로선은 평균 · 카드 결제 조건가는 뺐어요",
+                                "쇼핑몰을 누르면 그 쇼핑몰 상품으로 가요 · 세로선은 평균" + if (withShipping) " · 배송비 포함 금액" else "",
                                 fontSize = 11.5.sp, color = p.faint, lineHeight = 16.sp,
                             )
+                        }
+                    }
+                }
+
+                val cards = page?.cardOffers.orEmpty()
+                if (cards.isNotEmpty()) {
+                    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp).cardBg(20.dp, 1.dp).padding(18.dp)) {
+                        SectionTitle("카드 할인가 (참고)")
+                        Text("해당 카드로 결제할 때만 이 가격이에요. 위 최저가 비교에는 넣지 않았어요.", fontSize = 12.sp, color = p.sub, lineHeight = 17.sp)
+                        Spacer(Modifier.height(8.dp))
+                        cards.take(6).forEach { c ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable { open(c.link.ifBlank { danawaUrl }) }.padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(c.mall, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = p.ink)
+                                    Text("💳 ${c.condition}", fontSize = 12.sp, color = p.sub, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Text("${won(c.price)}원", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Brand)
+                            }
                         }
                     }
                 }

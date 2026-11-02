@@ -28,6 +28,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,7 +54,6 @@ import io.github.poohcjs.hotdealradar.data.Fav
 import io.github.poohcjs.hotdealradar.data.Index
 import io.github.poohcjs.hotdealradar.data.Item
 import io.github.poohcjs.hotdealradar.data.ItemKind
-import io.github.poohcjs.hotdealradar.data.LiveOption
 import io.github.poohcjs.hotdealradar.data.LiveProduct
 import io.github.poohcjs.hotdealradar.data.LiveSort
 import io.github.poohcjs.hotdealradar.data.Settings
@@ -61,10 +61,15 @@ import io.github.poohcjs.hotdealradar.data.ago
 import io.github.poohcjs.hotdealradar.data.defaultLiveSort
 import io.github.poohcjs.hotdealradar.data.isHot
 import io.github.poohcjs.hotdealradar.data.pct
+import io.github.poohcjs.hotdealradar.data.pickOption
 import io.github.poohcjs.hotdealradar.data.search
+import io.github.poohcjs.hotdealradar.data.shownCost
+import io.github.poohcjs.hotdealradar.data.shownUnit
 import io.github.poohcjs.hotdealradar.data.sortLive
 import io.github.poohcjs.hotdealradar.data.won
 import io.github.poohcjs.hotdealradar.ui.LiveSearchState
+import io.github.poohcjs.hotdealradar.ui.components.ChipOption
+import io.github.poohcjs.hotdealradar.ui.components.ChipRow
 import io.github.poohcjs.hotdealradar.ui.components.DealCard
 import io.github.poohcjs.hotdealradar.ui.components.EmptyNote
 import io.github.poohcjs.hotdealradar.ui.components.Pill
@@ -78,14 +83,21 @@ import io.github.poohcjs.hotdealradar.ui.theme.Good
 import io.github.poohcjs.hotdealradar.ui.theme.HD
 import io.github.poohcjs.hotdealradar.ui.theme.Warn
 
-private val SUGGESTIONS = listOf("화장지", "생수 2L", "물티슈", "커피 캡슐", "에어팟", "세탁세제", "즉석밥")
+private val SUGGESTIONS = listOf("화장지", "생수 2L", "물티슈", "커피 캡슐", "기저귀", "세탁세제", "즉석밥")
 
-/** 정렬에 맞는 대표 옵션: 단가순이면 단가가 가장 낮은 묶음, 가격순이면 가장 싼 묶음 */
-fun pickOption(p: LiveProduct, sort: LiveSort): LiveOption? = when (sort) {
-    LiveSort.UNIT -> p.bestUnitOption ?: p.options.minByOrNull { it.price }
-    LiveSort.PRICE -> p.options.minByOrNull { it.price }
-    LiveSort.RANK -> p.options.firstOrNull { it.pcode == p.pcode } ?: p.options.minByOrNull { it.price }
+/** 분류 칩: 가장 많은 분류가 절반 이상이면 처음부터 그 분류만 보여 준다 (치약을 찾는데 치약 짜개가 섞이지 않게) */
+fun dominantCategory(list: List<LiveProduct>): String? {
+    val counts = list.filter { it.category.isNotBlank() }.groupingBy { it.category }.eachCount()
+    val top = counts.maxByOrNull { it.value } ?: return null
+    return top.key.takeIf { counts.size > 1 && top.value * 2 >= list.size }
 }
+
+/** 다른 앱에서 공유한 글('상품명 https://…')에서 검색어만 남긴다 */
+fun queryFromShared(text: String): String =
+    text.replace(Regex("""https?://\S+"""), " ")
+        .replace(Regex("""[\[\]【】()（）<>{}"'|]"""), " ")
+        .replace(Regex("""\s+"""), " ").trim()
+        .split(' ').take(8).joinToString(" ")
 
 @Composable
 fun SearchScreen(
@@ -100,17 +112,22 @@ fun SearchScreen(
     contentPadding: PaddingValues,
     onOpen: (Item) -> Unit,
     onFav: (Item) -> Unit,
+    onSettings: ((Settings) -> Settings) -> Unit = {},
+    incomingQuery: String? = null,
+    onIncomingHandled: () -> Unit = {},
 ) {
     val p = HD.p
     var q by rememberSaveable { mutableStateOf(live.query) }
     var submitted by rememberSaveable { mutableStateOf(live.query) }
     var tab by rememberSaveable { mutableStateOf("live") }
     var sortName by rememberSaveable { mutableStateOf<String?>(null) }
+    var catPick by rememberSaveable(submitted) { mutableStateOf<String?>(null) } // null = 자동(주요 분류)
     var hideUsed by rememberSaveable { mutableStateOf(true) }
     var recents by remember { mutableStateOf(recent) }
     val focus = LocalFocusManager.current
     val context = LocalContext.current
     val local = remember(submitted, index) { search(index, submitted).sortedByDescending { it.rate ?: -999.0 } }
+    val ship = s.liveWithShipping
 
     fun submit(text: String = q) {
         val t = text.trim()
@@ -118,15 +135,27 @@ fun SearchScreen(
         if (t.length < 2) return
         submitted = t
         sortName = null
+        tab = "live"
         recents = (listOf(t) + recents.filter { it != t }).take(8)
         onRecent(recents)
         onSearchLive(t)
         focus.clearFocus()
     }
 
-    val liveList = live.results.filter { !(hideUsed && it.used) }
-    val sort = sortName?.let { LiveSort.valueOf(it) } ?: defaultLiveSort(liveList)
-    val sorted = sortLive(liveList, sort)
+    // 다른 앱에서 '공유 → 핫딜 레이더'로 들어온 상품명
+    LaunchedEffect(incomingQuery) {
+        val t = incomingQuery?.let { queryFromShared(it) }
+        if (!t.isNullOrBlank()) submit(t)
+        if (incomingQuery != null) onIncomingHandled()
+    }
+
+    val base = live.results.filter { !(hideUsed && it.used) }
+    val auto = dominantCategory(base)
+    val cat = catPick ?: auto ?: ""
+    val inCat = if (cat.isEmpty()) base else base.filter { it.category == cat }
+    val sort = sortName?.let { LiveSort.valueOf(it) } ?: defaultLiveSort(inCat)
+    val sorted = sortLive(inCat, sort, ship)
+    val cats = base.filter { it.category.isNotBlank() }.groupingBy { it.category }.eachCount().entries.sortedByDescending { it.value }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = contentPadding) {
         item { ScreenTitle("검색", "여러 쇼핑몰 가격을 지금 바로 비교해 가장 싼 곳을 찾아요") }
@@ -165,7 +194,7 @@ fun SearchScreen(
             }
             item {
                 Text(
-                    "검색하면 다나와에 실시간으로 물어 여러 쇼핑몰 중 가장 싼 값을 보여 줘요. 화장지·생수처럼 양이 다른 상품은 단가(예: 10m당, 1L당)로 비교해요.",
+                    "검색하면 다나와에 실시간으로 물어 여러 쇼핑몰 중 가장 싼 값을 보여 줘요. 배송비를 포함해 비교하고, 화장지·생수처럼 양이 다른 상품은 단가(10g당, 100ml당 등)로 비교해요.\n\n쇼핑몰 앱에서 상품을 ‘공유 → 핫딜 레이더’로 보내도 바로 최저가를 찾아요.",
                     fontSize = 13.sp, lineHeight = 19.sp, color = p.sub, modifier = Modifier.padding(20.dp),
                 )
             }
@@ -174,7 +203,7 @@ fun SearchScreen(
 
         item {
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("실시간 최저가", tab == "live", { tab = "live" }, count = if (live.loading) null else sorted.size)
+                Pill("실시간 최저가", tab == "live", { tab = "live" }, count = if (live.loading) null else base.size)
                 Pill("핫딜·커뮤니티", tab == "local", { tab = "local" }, count = local.size)
             }
         }
@@ -193,6 +222,7 @@ fun SearchScreen(
             return@LazyColumn
         }
 
+        val openUrl = { url: String -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
         when {
             live.loading -> item {
                 Column(Modifier.fillMaxWidth().padding(48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -203,44 +233,57 @@ fun SearchScreen(
             }
             live.error != null -> {
                 item { EmptyNote("지금은 실시간 가격을 못 불러왔어요", live.error, "📡") }
-                item { OtherSites(submitted) { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }
+                item { OtherSites(submitted, openUrl) }
             }
-            sorted.isEmpty() -> {
-                item { EmptyNote("검색 결과가 없어요", "다른 이름으로 찾아보거나 다나와에서 직접 볼 수 있어요.", "🔎") }
-                item { OtherSites(submitted) { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }
+            base.isEmpty() -> {
+                item { EmptyNote("검색 결과가 없어요", "다른 이름으로 찾아보거나 네이버쇼핑·다나와에서 직접 볼 수 있어요.", "🔎") }
+                item { OtherSites(submitted, openUrl) }
             }
             else -> {
-                val top = sorted.first()
-                val topOpt = pickOption(top, sort)
-                fun openProduct(prod: LiveProduct, opt: LiveOption?) {
+                fun openProduct(prod: LiveProduct) {
                     // 쇼핑몰 개별 상품은 다나와 상품 페이지가 없으니 그 쇼핑몰로 바로 간다
-                    if (prod.isListing) context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(prod.link)))
-                    else onOpenLive(opt?.pcode ?: prod.pcode)
+                    if (prod.isListing) openUrl(prod.link) else onOpenLive(pickOption(prod, sort, ship)?.pcode ?: prod.pcode)
                 }
-                item { BestPick(top, topOpt, sort, index) { openProduct(top, topOpt) } }
+                if (cats.size > 1) {
+                    item {
+                        ChipRow(
+                            listOf(ChipOption("", "전체", base.size)) + cats.take(8).map { ChipOption(it.key, it.key, it.value) },
+                            cat, { catPick = it }, Modifier.padding(bottom = 12.dp),
+                        )
+                    }
+                }
+                if (sorted.isNotEmpty()) {
+                    val top = sorted.first()
+                    item { BestPick(top, sort, ship, index) { openProduct(top) } }
+                }
                 item {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(top = 18.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         SortTabs(LiveSort.entries.map { it.name to it.label }, sort.name, { sortName = it })
-                        Spacer(Modifier.weight(1f))
                     }
                 }
                 item {
-                    Row(Modifier.padding(horizontal = 20.dp).padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.padding(horizontal = 20.dp).padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(
-                            "다나와 ${live.results.size}개 상품 · ${ago(live.searchedAt)} 확인", fontSize = 12.sp, color = p.faint,
-                            modifier = Modifier.weight(1f),
+                            (if (cat.isNotEmpty()) "‘$cat’ " else "") + "${sorted.size}개 · ${ago(live.searchedAt)} 확인" + if (live.loadingMore) " · 더 찾는 중…" else "",
+                            fontSize = 12.sp, color = p.faint, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
-                        Text(
-                            if (hideUsed) "✓ 중고·리퍼 뺌" else "중고·리퍼 포함", fontSize = 12.sp, color = p.sub, fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clickable { hideUsed = !hideUsed }.padding(4.dp),
-                        )
+                        Toggle(if (ship) "✓ 배송비 포함" else "배송비 빼고", ship) { onSettings { it.copy(liveWithShipping = !ship) } }
+                        Toggle(if (hideUsed) "✓ 중고 뺌" else "중고 포함", hideUsed) { hideUsed = !hideUsed }
                     }
                 }
                 items(sorted.drop(1), key = { "live-" + it.pcode }) { prod ->
-                    val opt = pickOption(prod, sort)
-                    LiveRow(prod, opt, sort, index, fav = (opt?.pcode ?: prod.pcode) in favs) { openProduct(prod, opt) }
+                    LiveRow(prod, sort, ship, index, fav = (pickOption(prod, sort, ship)?.pcode ?: prod.pcode) in favs) { openProduct(prod) }
                 }
-                item { OtherSites(submitted) { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }
+                if (live.loadingMore) {
+                    item {
+                        Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(color = Brand, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("다음 쪽 결과를 더 찾고 있어요", fontSize = 13.sp, color = p.sub)
+                        }
+                    }
+                }
+                item { OtherSites(submitted, openUrl) }
             }
         }
         item { Spacer(Modifier.height(28.dp)) }
@@ -248,6 +291,16 @@ fun SearchScreen(
 }
 
 fun danawaSearchUrl(q: String) = "https://search.danawa.com/?query=" + Uri.encode(q.trim())
+
+fun naverShoppingUrl(q: String) = "https://search.shopping.naver.com/ns/search?query=" + Uri.encode(q.trim())
+
+@Composable
+private fun Toggle(text: String, on: Boolean, onClick: () -> Unit) {
+    Text(
+        text, fontSize = 12.sp, color = if (on) HD.p.ink else HD.p.sub, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.clickable(onClick = onClick).padding(vertical = 4.dp),
+    )
+}
 
 @Composable
 private fun SmallLabel(text: String) {
@@ -260,8 +313,6 @@ private fun ChipLine(words: List<String>, onClick: (String) -> Unit) {
         items(words) { w -> Pill(w, false, { onClick(w) }) }
     }
 }
-
-fun naverShoppingUrl(q: String) = "https://search.shopping.naver.com/ns/search?query=" + Uri.encode(q.trim())
 
 /** 다나와에 없거나 더 찾아보고 싶을 때: 같은 검색어로 네이버쇼핑·다나와를 바로 연다 (앱이 대신 읽지 않고 사용자가 직접 봄) */
 @Composable
@@ -291,17 +342,33 @@ private fun OtherSites(q: String, open: (String) -> Unit) {
 private fun liveDeal(index: Index, pcodes: Collection<String>): Item? =
     pcodes.flatMap { index.dealsByPcode[it].orEmpty() }.filter { !it.ended }.minByOrNull { it.price ?: Long.MAX_VALUE }
 
-@Composable
-private fun BestPick(prod: LiveProduct, opt: LiveOption?, sort: LiveSort, index: Index, onClick: () -> Unit) {
-    val p = HD.p
+private fun shippingText(fee: Long?) = when {
+    fee == null -> "배송비 확인 필요"
+    fee == 0L -> "무료배송"
+    else -> "배송비 ${won(fee)}원"
+}
+
+/** '상품가 1,540원 + 배송비 3,000원' (배송비 포함으로 볼 때 차이가 있으면) */
+private fun breakdown(prod: LiveProduct, sort: LiveSort, ship: Boolean): String? {
+    if (!ship) return null
+    val opt = pickOption(prod, sort, true)
     val price = opt?.price ?: prod.price
-    val unit = opt?.unit ?: prod.unit
+    val cost = opt?.cost(true) ?: prod.cost(true)
+    return if (cost > price) "상품가 ${won(price)}원 + 배송비 ${won(cost - price)}원" else null
+}
+
+@Composable
+private fun BestPick(prod: LiveProduct, sort: LiveSort, ship: Boolean, index: Index, onClick: () -> Unit) {
+    val p = HD.p
+    val opt = pickOption(prod, sort, ship)
+    val cost = shownCost(prod, sort, ship)
+    val unit = shownUnit(prod, sort, ship)
     val malls = opt?.malls ?: prod.malls
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 20.dp).clip(RoundedCornerShape(24.dp)).background(p.hero).clickable(onClick = onClick).padding(20.dp),
     ) {
         Text(
-            if (sort == LiveSort.UNIT) "🏆 단가가 가장 싼 상품" else "🏆 가장 싼 상품",
+            (if (sort == LiveSort.UNIT) "🏆 단가가 가장 싼 상품" else "🏆 가장 싼 상품") + if (ship) " · 배송비 포함" else "",
             color = Color(0xFFFFB38F), fontSize = 13.sp, fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(12.dp))
@@ -316,9 +383,10 @@ private fun BestPick(prod: LiveProduct, opt: LiveOption?, sort: LiveSort, index:
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text(won(price), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.6).sp)
+                    Text(won(cost), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.6).sp)
                     Text("원", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 2.dp))
                 }
+                breakdown(prod, sort, ship)?.let { Text(it, color = Color.White.copy(alpha = 0.6f), fontSize = 11.5.sp) }
             }
         }
         Spacer(Modifier.height(14.dp))
@@ -326,7 +394,7 @@ private fun BestPick(prod: LiveProduct, opt: LiveOption?, sort: LiveSort, index:
             if (unit != null) HeroChip("${if (unit.estimated) "약 " else ""}${unit.value}원 / ${unit.per}")
             if (malls != null) HeroChip("쇼핑몰 ${malls}곳 비교")
             if (prod.isListing) HeroChip("${prod.mall} · ${shippingText(prod.shippingFee)}")
-            liveDeal(index, listOfNotNull(prod.pcode) + prod.options.map { it.pcode })?.let { d -> HeroChip("🔥 핫딜 ${pct(d.rate)}%↓") }
+            liveDeal(index, listOf(prod.pcode) + prod.options.map { it.pcode })?.let { d -> HeroChip("🔥 핫딜 ${pct(d.rate)}%↓") }
         }
     }
 }
@@ -334,16 +402,17 @@ private fun BestPick(prod: LiveProduct, opt: LiveOption?, sort: LiveSort, index:
 @Composable
 private fun HeroChip(text: String) {
     Text(
-        text, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+        text, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
         modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.1f)).padding(horizontal = 10.dp, vertical = 6.dp),
     )
 }
 
 @Composable
-private fun LiveRow(prod: LiveProduct, opt: LiveOption?, sort: LiveSort, index: Index, fav: Boolean, onClick: () -> Unit) {
+private fun LiveRow(prod: LiveProduct, sort: LiveSort, ship: Boolean, index: Index, fav: Boolean, onClick: () -> Unit) {
     val p = HD.p
-    val price = opt?.price ?: prod.price
-    val unit = opt?.unit ?: prod.unit
+    val opt = pickOption(prod, sort, ship)
+    val cost = shownCost(prod, sort, ship)
+    val unit = shownUnit(prod, sort, ship)
     val malls = opt?.malls ?: prod.malls
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 5.dp).cardBg(18.dp, 2.dp).clickable(onClick = onClick).padding(12.dp),
@@ -364,7 +433,7 @@ private fun LiveRow(prod: LiveProduct, opt: LiveOption?, sort: LiveSort, index: 
             Text(prod.name, fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.Medium, color = p.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(5.dp))
             Row(verticalAlignment = Alignment.Bottom) {
-                Text("${won(price)}원", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = p.ink)
+                Text("${won(cost)}원", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = p.ink)
                 if (unit != null) {
                     Spacer(Modifier.width(6.dp))
                     Text(
@@ -373,14 +442,9 @@ private fun LiveRow(prod: LiveProduct, opt: LiveOption?, sort: LiveSort, index: 
                     )
                 }
             }
+            breakdown(prod, sort, ship)?.let { Text(it, fontSize = 11.5.sp, color = p.sub) }
             if (malls != null) Text("쇼핑몰 ${malls}곳 중 최저가", fontSize = 11.5.sp, color = p.faint)
             if (prod.isListing) Text("${prod.mall} 개별 상품 · ${shippingText(prod.shippingFee)} · 누르면 쇼핑몰로", fontSize = 11.5.sp, color = p.faint)
         }
     }
-}
-
-private fun shippingText(fee: Long?) = when {
-    fee == null -> "배송비 확인 필요"
-    fee == 0L -> "무료배송"
-    else -> "배송비 ${won(fee)}원"
 }

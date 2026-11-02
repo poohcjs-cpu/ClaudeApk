@@ -26,7 +26,10 @@ import io.github.poohcjs.hotdealradar.data.Item
 import io.github.poohcjs.hotdealradar.data.Prefs
 import io.github.poohcjs.hotdealradar.data.Repository
 import io.github.poohcjs.hotdealradar.data.Settings
+import io.github.poohcjs.hotdealradar.data.LiveSearchClient
 import io.github.poohcjs.hotdealradar.data.beatsOthers
+import io.github.poohcjs.hotdealradar.data.currentBest
+import io.github.poohcjs.hotdealradar.data.matchesKeyword
 import io.github.poohcjs.hotdealradar.data.dealVisible
 import io.github.poohcjs.hotdealradar.data.pct
 import io.github.poohcjs.hotdealradar.data.won
@@ -41,9 +44,11 @@ class DealCheckWorker(context: Context, params: WorkerParameters) : CoroutineWor
     override suspend fun doWork(): Result {
         val prefs = Prefs(applicationContext)
         val s = prefs.settings.value
-        if (!s.notify && !s.notifyTarget) return Result.success()
+        if (!s.notify && !s.notifyTarget && s.keywords.isEmpty()) return Result.success()
         val data = runCatching { Repository(applicationContext, prefs).fetch() }.getOrElse { return Result.retry() }
         val index = Index(data)
+        if (s.keywords.isNotEmpty()) checkKeywords(index, prefs, s)
+        if (s.notifyTarget) refreshFavPrices(index, prefs)
 
         if (s.notify) {
             val already = prefs.notifiedIds
@@ -60,18 +65,65 @@ class DealCheckWorker(context: Context, params: WorkerParameters) : CoroutineWor
         return Result.success()
     }
 
+    /** 관심 키워드가 들어간 새 커뮤니티 글 (최근 3시간 안에 처음 본 글만, 같은 글은 한 번만) */
+    private fun checkKeywords(index: Index, prefs: Prefs, s: io.github.poohcjs.hotdealradar.data.Settings) {
+        val already = prefs.notifiedIds
+        val since = System.currentTimeMillis() - 3 * 3_600_000L
+        val hits = index.posts.filter { !it.ended && (it.detectedAt ?: 0) >= since && "kw:${it.key}" !in already }
+            .mapNotNull { p -> matchesKeyword(p.title, s.keywords)?.let { k -> k to p } }
+        if (hits.isEmpty()) return
+        if (canNotify(applicationContext)) {
+            val nm = NotificationManagerCompat.from(applicationContext)
+            hits.take(MAX_PER_RUN).forEach { (k, p) ->
+                val target = index.itemForPost(p)
+                val line = listOfNotNull(
+                    index.srcName(p.source), p.price?.let { "${won(it)}원" },
+                    target.rate?.let { "평균보다 ${pct(it)}%↓" },
+                ).joinToString(" · ")
+                val n = NotificationCompat.Builder(applicationContext, CHANNEL_DEALS)
+                    .setSmallIcon(R.drawable.ic_fire)
+                    .setContentTitle("‘$k’ 딜 · ${p.title}")
+                    .setContentText(line)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText("${p.title}\n$line"))
+                    .setContentIntent(openIntent(target.key))
+                    .setAutoCancel(true)
+                    .build()
+                runCatching { nm.notify(("kw:" + p.key).hashCode(), n) }
+            }
+        }
+        prefs.notifiedIds = already + hits.map { "kw:${it.second.key}" }
+    }
+
+    /**
+     * 찜한 제품 중 수집기가 지켜보지 않는 것은 앱이 다나와 상품 페이지를 직접 확인한다.
+     * 제품마다 3시간에 한 번, 한 번에 최대 8개만 (다나와에 부담 주지 않게).
+     */
+    private suspend fun refreshFavPrices(index: Index, prefs: Prefs) {
+        val now = System.currentTimeMillis()
+        val due = prefs.favs.value.filter { (pcode, f) ->
+            pcode.all { it.isDigit() } && index.products[pcode]?.lowest == null && now - f.checkedAt > 3 * 3_600_000L
+        }.keys.take(8)
+        if (due.isEmpty()) return
+        val client = LiveSearchClient()
+        for (pcode in due) {
+            val page = runCatching { client.product(pcode) }.getOrNull() ?: continue
+            val best = page.offers.minByOrNull { it.price } ?: continue
+            prefs.updateFavs { favs -> favs[pcode]?.let { favs + (pcode to it.withPrice(best.price, best.mall, now)) } ?: favs }
+        }
+    }
+
     private fun checkTargets(index: Index, prefs: Prefs) {
         val favs = prefs.favs.value
         val sent = prefs.targetNotified.toMutableMap()
         for ((pcode, fav) in favs) {
             val target = fav.target ?: continue
-            val best = index.bestNow(pcode) ?: continue
+            val best = currentBest(pcode, fav, index) ?: continue
             if (best.price > target) {
                 sent.remove(pcode) // 다시 올라가면 다음에 내려올 때 또 알린다
                 continue
             }
             if (sent[pcode]?.let { best.price >= it } == true) continue
-            notifyTarget(pcode, fav, best.price, best.mall, best.via)
+            notifyTarget(pcode, fav, best.price, best.mall, best.via, if (index.products[pcode] != null) "prod:$pcode" else "live:$pcode")
             sent[pcode] = best.price
         }
         prefs.targetNotified = sent
@@ -106,13 +158,13 @@ class DealCheckWorker(context: Context, params: WorkerParameters) : CoroutineWor
         }
     }
 
-    private fun notifyTarget(pcode: String, fav: Fav, price: Long, mall: String, via: String) {
+    private fun notifyTarget(pcode: String, fav: Fav, price: Long, mall: String, via: String, openKey: String) {
         if (!canNotify(applicationContext)) return
         val n = NotificationCompat.Builder(applicationContext, CHANNEL_DEALS)
             .setSmallIcon(R.drawable.ic_fire)
             .setContentTitle("목표가 도달 · ${fav.name}")
             .setContentText("$mall ${won(price)}원 ($via) · 목표 ${won(fav.target)}원")
-            .setContentIntent(openIntent("prod:$pcode"))
+            .setContentIntent(openIntent(openKey))
             .setAutoCancel(true)
             .build()
         runCatching { NotificationManagerCompat.from(applicationContext).notify(("target:$pcode").hashCode(), n) }
@@ -141,7 +193,7 @@ class DealCheckWorker(context: Context, params: WorkerParameters) : CoroutineWor
             if (already.isEmpty()) return emptyList()
             return index.deals
                 .filter { it.key !in already }
-                .filter { (it.rate ?: 0.0) >= s.notifyThreshold && (!s.onlyCheapest || beatsOthers(it)) }
+                .filter { (it.rate ?: 0.0) >= s.notifyThreshold && (!s.onlyCheapest || beatsOthers(it)) && !it.outlier }
                 .filter { dealVisible(it, s.copy(hideSuspicious = true, hideEnded = true)) }
                 .filter { !s.notifyInterestsOnly || s.interests.isEmpty() || it.cat in s.interests }
                 .sortedByDescending { it.rate }

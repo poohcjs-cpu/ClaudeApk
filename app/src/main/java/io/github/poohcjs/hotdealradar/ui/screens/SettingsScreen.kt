@@ -100,6 +100,45 @@ fun SettingsScreen(
             }
         }
 
+        Group("관심 키워드 알림") {
+            Text(
+                "이 말이 들어간 새 딜이 커뮤니티에 올라오면 알려 드리고, 핫딜 탭 위쪽에 모아 보여 줘요. 예: 닥터노아, 기저귀, 에어팟",
+                fontSize = 12.5.sp, lineHeight = 18.sp, color = p.sub,
+            )
+            Spacer(Modifier.height(10.dp))
+            var kw by remember { mutableStateOf("") }
+            fun addKw() {
+                val k = kw.trim()
+                if (k.length >= 2 && s.keywords.none { it.equals(k, ignoreCase = true) }) onChange { it.copy(keywords = (it.keywords + k).take(20)) }
+                kw = ""
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(p.tile)
+                        .border(1.dp, p.line, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 12.dp),
+                ) {
+                    if (kw.isEmpty()) Text("키워드 입력", fontSize = 14.sp, color = p.faint)
+                    BasicTextField(
+                        value = kw, onValueChange = { kw = it.take(20) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        textStyle = TextStyle(fontSize = 14.sp, color = p.ink), cursorBrush = SolidColor(Brand),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { addKw() }),
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "추가", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(p.ink).clickable { addKw() }.padding(horizontal = 18.dp, vertical = 12.dp),
+                )
+            }
+            if (s.keywords.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    s.keywords.forEach { k -> Pill("$k  ✕", true, { onChange { it.copy(keywords = it.keywords - k) } }) }
+                }
+            }
+        }
+
         Group("알림") {
             ToggleRow("새 핫딜 알림", "1시간마다 확인해요. 배터리 절약 모드에서는 늦어질 수 있어요", s.notify) { v ->
                 if (v) onAskNotificationPermission()

@@ -198,7 +198,7 @@ fun DetailScreen(
                     DetailCard {
                         SectionTitle("목표가 알림")
                         var input by remember(fav.target) { mutableStateOf(fav.target?.toString().orEmpty()) }
-                        val best = index.bestNow(favPcode)
+                        val best = io.github.poohcjs.hotdealradar.data.currentBest(favPcode, fav, index)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(p.tile)

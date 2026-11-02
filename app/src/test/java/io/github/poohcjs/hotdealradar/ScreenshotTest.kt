@@ -134,6 +134,20 @@ class ScreenshotTest {
         )
     }
 
+    @Test @Config(qualifiers = "w400dp-h1700dp-xxhdpi")
+    fun searchBaby() = shot("6_search_baby", withBar = Tab.SEARCH) {
+        val list = DanawaParser.parseSearch(res("danawa_search_baby.html"))
+        SearchScreen(
+            index, s, favs, emptyList(), {}, LiveSearchState("아기 치약", false, list, null, System.currentTimeMillis(), loadingMore = true), {}, {},
+            none, {}, {},
+        )
+    }
+
+    @Test @Config(qualifiers = "w400dp-h2400dp-xxhdpi")
+    fun dealsKeywords() = shot("1_deals_keywords", withBar = Tab.DEALS) {
+        DealsScreen(index, s.copy(keywords = listOf("버즈", "두유")), favs, cutoff, false, none, {}, {})
+    }
+
     @Test fun searchEmpty() = shot("6_search_empty", withBar = Tab.SEARCH) {
         SearchScreen(index, s, favs, listOf("에어팟", "생수 2L"), {}, LiveSearchState(), {}, {}, none, {}, {})
     }

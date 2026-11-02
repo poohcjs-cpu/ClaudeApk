@@ -281,7 +281,7 @@ fun DealCard(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 if (hot) TierBadge(tier(x.rate))
                 if (x.kind == ItemKind.MARKET) Tag("발굴", Discover)
-                if (x.suspicious) Tag("확인 필요", Warn)
+                if (x.suspicious || x.outlier) Tag("확인 필요", Warn)
                 if (x.ended) Tag("종료")
                 Text(x.mall, fontSize = 12.sp, color = p.sub, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }

@@ -37,6 +37,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.poohcjs.hotdealradar.R
 import io.github.poohcjs.hotdealradar.data.DealSort
+import io.github.poohcjs.hotdealradar.ui.components.cardBg
+import io.github.poohcjs.hotdealradar.ui.components.PostRow
+import io.github.poohcjs.hotdealradar.data.popularPosts
+import io.github.poohcjs.hotdealradar.data.matchesKeyword
 import io.github.poohcjs.hotdealradar.data.Fav
 import io.github.poohcjs.hotdealradar.data.Index
 import io.github.poohcjs.hotdealradar.data.Item
@@ -93,7 +97,14 @@ fun DealsScreen(
     val scoped = index.deals.filter { dealVisible(it, s) && inHomeScope(it, s) }
     val hot = scoped.filter { isHot(it, s) }
     val live = hot.filter { !it.ended }
-    val top = live.filter { !it.suspicious }.sortedByDescending { it.rate ?: 0.0 }.take(5)
+    val top = live.filter { !it.suspicious && !it.outlier }.sortedByDescending { it.rate ?: 0.0 }.take(5)
+    val popular = popularPosts(index, s)
+    val keywordHits = if (s.keywords.isEmpty()) emptyList() else
+        (index.deals.filter { !it.ended && dealVisible(it, s) } + index.posts.filter { !it.ended && it.rate == null })
+            .mapNotNull { x -> matchesKeyword(x.title.ifBlank { x.name }, s.keywords)?.let { k -> k to x } }
+            .distinctBy { it.second.url }.take(8)
+    val genAt = parseTime(index.file.generatedAt)
+    val staleHours = genAt?.let { (System.currentTimeMillis() - it) / 3_600_000L } ?: 0
     val byKind = when (kind) {
         "community" -> hot.filter { it.kind == ItemKind.COMMUNITY }
         "market" -> hot.filter { it.kind == ItemKind.MARKET }
@@ -116,7 +127,11 @@ fun DealsScreen(
                 Spacer(Modifier.width(8.dp))
                 Text("핫딜 레이더", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = p.ink, letterSpacing = (-0.5).sp)
                 Spacer(Modifier.weight(1f))
-                Text("${ago(parseTime(index.file.generatedAt))} 업데이트", fontSize = 12.sp, color = p.faint)
+                Text(
+                    (if (staleHours >= 3) "⚠ " else "") + "${ago(genAt)} 업데이트", fontSize = 12.sp,
+                    color = if (staleHours >= 3) io.github.poohcjs.hotdealradar.ui.theme.Warn else p.faint,
+                    fontWeight = if (staleHours >= 3) FontWeight.Bold else FontWeight.Normal,
+                )
             }
         }
         item {
@@ -158,6 +173,22 @@ fun DealsScreen(
                     }
                 }
             }
+        }
+
+        if (keywordHits.isNotEmpty()) {
+            item { SectionHeader("관심 키워드 딜", s.keywords.joinToString(" · ") { "‘$it’" } + " 이(가) 들어간 글") }
+            items(keywordHits, key = { "kw-" + it.second.key }) { (_, x) ->
+                if (x.kind == ItemKind.POST) PostCard(x, index, s) { onOpen(index.itemForPost(x)) }
+                else DealCard(
+                    x = x, catIcon = catIcon(index, x.cat), origin = originLabel(x, index), hot = isHot(x, s), isNew = isNew(x, newCutoff),
+                    fav = x.pcode != null && x.pcode in favs, onFav = if (x.pcode != null) ({ onFav(x) }) else null, onClick = { onOpen(x) },
+                )
+            }
+        }
+
+        if (popular.isNotEmpty()) {
+            item { SectionHeader("커뮤니티 인기 딜", "다나와 가격과 비교하진 못했지만 추천·댓글이 많은 최근 24시간 글이에요") }
+            items(popular, key = { "pop-" + it.key }) { x -> PostCard(x, index, s) { onOpen(index.itemForPost(x)) } }
         }
 
         item { SectionHeader("전체 핫딜", if (interestActive(s)) "관심 제품군 ${s.interests.size}개만 보고 있어요" else null) }
@@ -222,5 +253,13 @@ private fun HeroStat(label: String, value: String, modifier: Modifier = Modifier
                 Box(Modifier.size(6.dp).clip(CircleShape).background(Brand))
             }
         }
+    }
+}
+
+/** 커뮤니티 글 한 줄을 카드로 */
+@Composable
+fun PostCard(x: Item, index: Index, s: Settings, onClick: () -> Unit) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 5.dp).cardBg(18.dp, 2.dp)) {
+        PostRow(x, index.srcName(x.source), s.threshold, onClick)
     }
 }

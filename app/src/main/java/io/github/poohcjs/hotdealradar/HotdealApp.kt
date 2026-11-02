@@ -20,8 +20,8 @@ class HotdealApp : Application(), SingletonImageLoader.Factory {
         prefs = Prefs(this)
         repository = Repository(this, prefs)
         DealCheckWorker.createChannel(this)
-        val s = prefs.settings.value
-        DealCheckWorker.schedule(this, s.notify || s.notifyTarget)
+        // 알림·키워드·찜 가격 확인을 1시간마다 (꺼진 일은 작업 안에서 건너뛴다)
+        DealCheckWorker.schedule(this, true)
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =

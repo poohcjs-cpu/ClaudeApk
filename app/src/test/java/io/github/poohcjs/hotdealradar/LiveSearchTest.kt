@@ -5,7 +5,7 @@ import io.github.poohcjs.hotdealradar.data.LiveSort
 import io.github.poohcjs.hotdealradar.data.UnitPrice
 import io.github.poohcjs.hotdealradar.data.defaultLiveSort
 import io.github.poohcjs.hotdealradar.data.sortLive
-import io.github.poohcjs.hotdealradar.ui.screens.pickOption
+import io.github.poohcjs.hotdealradar.data.pickOption
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -33,7 +33,7 @@ class LiveSearchTest {
         val units = sorted.map { (pickOption(it, LiveSort.UNIT)?.unit ?: it.unit)!!.value }
         assertEquals(units.sorted(), units)
         assertEquals(units.min(), units.first())
-        val byPrice = sortLive(clean, LiveSort.PRICE).map { it.price }
+        val byPrice = sortLive(clean, LiveSort.PRICE).map { io.github.poohcjs.hotdealradar.data.shownCost(it, LiveSort.PRICE, false) }
         assertEquals(byPrice.sorted(), byPrice)
     }
 

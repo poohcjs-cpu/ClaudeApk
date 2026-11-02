@@ -47,6 +47,8 @@ data class Item(
     val mentions: List<Mention> = emptyList(),
     /** 다음으로 싼 곳(커뮤니티 딜: 다른 쇼핑몰 최저가, 발굴: 두 번째로 싼 곳)보다 몇 % 싼지. 모르면 null */
     val vsBest: Double? = null,
+    /** 가격비교 발굴인데 혼자만 2위보다 25% 넘게 싼 경우: 다른 구성·오등록일 때가 많아 확인 필요 */
+    val outlier: Boolean = false,
     val verifyStatus: String? = null,
     val verifyReason: String? = null,
     val priceFromBody: Boolean = false,
@@ -114,6 +116,7 @@ class Index(val file: DealsFile) {
                 ended = d.ended, votes = d.votes, comments = d.comments, views = d.views,
                 image = d.image.ifBlank { products[d.pcode]?.image.orEmpty() }, mentions = d.mentions,
                 vsBest = if (d.kind == "market") cheaperBy(d.price, d.secondPrice) else cheaperBy(d.dealTotal ?: d.price, d.lowest),
+                outlier = d.kind == "market" && (cheaperBy(d.price, d.secondPrice) ?: 0.0) >= OUTLIER_GAP,
             )
         }
 
@@ -174,6 +177,9 @@ class Index(val file: DealsFile) {
 data class BestPrice(val price: Long, val mall: String, val via: String, val deal: Item?)
 
 // ── 판정 ─────────────────────────────────────────────────────
+
+/** 발굴 딜이 2위보다 이만큼(%) 넘게 싸면 '확인 필요' */
+const val OUTLIER_GAP = 25.0
 
 /** 다른 쇼핑몰이 같은 값이거나 더 싸면(1% 미만 차이) 핫딜로 치지 않는다. 비교할 값이 없으면 통과 */
 fun beatsOthers(x: Item) = x.vsBest == null || x.vsBest >= 1.0
@@ -256,6 +262,9 @@ fun verdictText(x: Item, s: Settings, srcName: (String) -> String = { it }): Str
     if (!beatsOthers(x)) {
         sb.append(" 다만 다른 쇼핑몰에서도 거의 같은 값에 팔고 있어 특별히 싼 딜은 아니에요.")
     }
+    if (x.outlier) {
+        sb.append(" 이 쇼핑몰만 2위보다 ${pct(x.vsBest)}% 넘게 싸서, 구성(용량·개수·해외판)이 다르거나 잘못 올라온 가격일 수 있어요. 사기 전에 꼭 확인하세요.")
+    }
     return sb.toString()
 }
 
@@ -274,12 +283,38 @@ fun howText(x: Item, params: Params): List<String> = buildList {
     if (x.suspicious) add("평균보다 ${pct(params.suspiciousRate)}% 넘게 싸요. 옵션가·리퍼·가격 오류인지 꼭 확인하세요.")
 }
 
+/** 찜한 제품의 지금 가장 싼 값: 모아 둔 데이터(딜·다나와 최저가)와 앱이 직접 확인한 다나와 가격 중 싼 쪽 */
+fun currentBest(pcode: String, fav: Fav?, index: Index?): BestPrice? {
+    val fromIndex = index?.bestNow(pcode)
+    val fresh = fav?.lastPrice?.let { BestPrice(it, fav.lastMall, "다나와 실시간", null) }
+    return listOfNotNull(fromIndex, fresh).minByOrNull { it.price }
+}
+
 /** 목표가에 닿았는지 */
 fun targetReached(pcode: String, favs: Map<String, Fav>, index: Index): Boolean {
     val f = favs[pcode] ?: return false
     val target = f.target ?: return false
-    val best = index.bestNow(pcode) ?: return false
+    val best = currentBest(pcode, f, index) ?: return false
     return best.price <= target
+}
+
+/** 관심 키워드가 제목에 들어 있는지 (띄어쓰기·대소문자 무시) */
+fun matchesKeyword(text: String, keywords: List<String>): String? {
+    val t = normalizeQuery(text)
+    return keywords.firstOrNull { k -> normalizeQuery(k).let { it.length >= 2 && it in t } }
+}
+
+/** 커뮤니티 인기 딜: 다나와 가격으로 비교하지 못했어도 추천·댓글이 많은 최근 글 */
+fun popularPosts(index: Index, s: Settings, now: Long = System.currentTimeMillis(), limit: Int = 6): List<Item> {
+    val shown = index.deals.filter { isHot(it, s) }.flatMap { d -> d.mentions.map { "post:" + it.id } }.toSet()
+    return index.posts.asSequence()
+        .filter { !it.ended && it.key !in shown && it.rate == null }
+        .filter { srcOn(it.source, s) && it.mall !in s.excludedMalls }
+        .filter { it.verifyReason?.contains("디지털") != true }
+        .filter { (it.postedAt ?: it.detectedAt ?: 0) > now - 24 * 3_600_000L }
+        .filter { (it.votes ?: 0) >= 5 || (it.comments ?: 0) >= 15 }
+        .sortedByDescending { (it.votes ?: 0) * 3 + (it.comments ?: 0) }
+        .take(limit).toList()
 }
 
 /** 검색: 지켜보는 제품 + 커뮤니티 글에서 이름으로 찾기 */

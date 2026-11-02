@@ -30,6 +30,8 @@ data class Settings(
     val notifyInterestsOnly: Boolean = true,
     val notifyTarget: Boolean = true,            // 찜 목표가 도달 알림
     val dataUrl: String = "",                    // 비우면 기본 주소
+    val liveWithShipping: Boolean = true,        // 실시간 검색: 배송비 포함 가격으로 비교
+    val keywords: List<String> = emptyList(),    // 관심 키워드: 이 말이 들어간 새 커뮤니티 딜이 올라오면 알림
 ) {
     fun clamp() = copy(threshold = threshold.coerceIn(5, 70), notifyThreshold = notifyThreshold.coerceIn(5, 70))
 }
@@ -44,7 +46,15 @@ data class Fav(
     val mall: String = "",
     val cat: String = "etc",
     val image: String = "",
-)
+    // 앱이 직접 확인한 다나와 가격 (수집기가 지켜보지 않는 제품도 추적하려고)
+    val lastPrice: Long? = null,
+    val lastMall: String = "",
+    val checkedAt: Long = 0,
+    val lowestSeen: Long? = null,
+) {
+    fun withPrice(price: Long, mall: String, at: Long = System.currentTimeMillis()) =
+        copy(lastPrice = price, lastMall = mall, checkedAt = at, lowestSeen = minOf(lowestSeen ?: price, price))
+}
 
 class Prefs(context: Context) {
     private val sp: SharedPreferences = context.getSharedPreferences("hotdeal", Context.MODE_PRIVATE)
