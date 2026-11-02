@@ -35,8 +35,8 @@ data class LiveOption(
     val unit: UnitPrice?,
 )
 
-/** '98원/10m' → 98원 per '10m' */
-data class UnitPrice(val text: String, val value: Long, val per: String) {
+/** '98원/10m' → 98원 per '10m'. estimated: 다나와가 준 값이 아니라 상품 이름의 용량·개수로 계산한 값 */
+data class UnitPrice(val text: String, val value: Long, val per: String, val estimated: Boolean = false) {
     companion object {
         private val RE = Regex("""([\d,]+)\s*원\s*/\s*(.+)""")
         fun parse(text: String?): UnitPrice? {
@@ -44,6 +44,28 @@ data class UnitPrice(val text: String, val value: Long, val per: String) {
             val m = RE.matchEntire(t) ?: return null
             val v = m.groupValues[1].replace(",", "").toLongOrNull() ?: return null
             return UnitPrice(t, v, m.groupValues[2].trim())
+        }
+
+        private val SIZE = Regex("""(\d+(?:\.\d+)?)\s*(kg|KG|Kg|g|G|ml|mL|ML|L|l|리터)(?![A-Za-z가-힣])""")
+        // '6개월'은 개수가 아니다
+        private val COUNT = Regex("""(\d+)\s*(개입|개(?!월)|입|팩|EA|ea|병|통|박스|세트)""")
+
+        /** 이름의 '60g 3개' → 가격을 10g당(액체는 100ml당)으로. 다나와 단가와 같은 단위를 쓴다 */
+        fun estimate(name: String, price: Long): UnitPrice? {
+            val sm = SIZE.find(name) ?: return null
+            var size = sm.groupValues[1].toDoubleOrNull() ?: return null
+            val unit = sm.groupValues[2].lowercase()
+            val liquid = unit == "ml" || unit == "l" || unit == "리터"
+            if (unit == "kg" || unit == "l" || unit == "리터") size *= 1000
+            // 용량 뒤에 나오는 개수를 곱한다: '75g 1개입 X 5개 세트' → 1 × 5
+            val count = COUNT.findAll(name, sm.range.last).mapNotNull { it.groupValues[1].toIntOrNull()?.takeIf { n -> n in 1..500 } }
+                .fold(1) { a, b -> a * b }.coerceIn(1, 1000)
+            val total = size * count
+            if (total <= 0) return null
+            val per = if (liquid) "100ml" else "10g"
+            val base = if (liquid) 100.0 else 10.0
+            val v = Math.round(price / (total / base))
+            return UnitPrice("${v}원/$per", v, per, estimated = true)
         }
     }
 }
@@ -59,7 +81,14 @@ data class LiveProduct(
     val used: Boolean,
     val overseas: Boolean,
     val rank: Int,
+    /** 가격비교로 묶이지 않은 쇼핑몰 개별 상품('검색상품')이면 그 쇼핑몰 이름 */
+    val mall: String? = null,
+    /** 개별 상품의 쇼핑몰 바로가기 (다나와 연결 주소) */
+    val link: String = "",
+    val shippingFee: Long? = null,
 ) {
+    val isListing: Boolean get() = mall != null
+
     /** 단가가 가장 낮은 옵션 (단가 정보가 없으면 null) */
     val bestUnitOption: LiveOption? get() = options.filter { it.unit != null }.minByOrNull { it.unit!!.value }
 }
@@ -126,12 +155,26 @@ object DanawaParser {
             val obj = runCatching { JSON.parseToJsonElement(payload.substring(start, end)).jsonObject }.getOrNull() ?: continue
             val pcode = obj.str("productSeq") ?: continue
             val price = obj.long("minPrice") ?: 0
-            if (pcode in seen || price <= 0 || !pcode.all { it.isDigit() }) continue
+            if (pcode in seen || price <= 0) continue
             if (obj["isAdultProduct"]?.let { (it as? JsonPrimitive)?.contentOrNull } == "true") continue
             seen += pcode
             val name = plain(obj.str("productName"))
+            if (!pcode.all { it.isDigit() }) {
+                // 쇼핑몰 개별 상품 (예: 'EE128_4846453693'): 가격비교 묶음이 없어 상품 페이지 대신 쇼핑몰로 바로 간다
+                val link = obj.str("linkUrl")?.let { if (it.startsWith("//")) "https:$it" else it }.orEmpty()
+                if (!link.startsWith("http")) continue
+                val img = obj.str("imageUrl").orEmpty().let { if (it.startsWith("//")) "https:$it" else it }
+                out += LiveProduct(
+                    pcode = pcode, name = name, image = img, price = price, malls = null,
+                    unit = UnitPrice.parse(obj.str("unitPrice")) ?: UnitPrice.estimate(name, price),
+                    options = emptyList(), used = USED.any { it in name }, overseas = OVERSEAS.any { it in name }, rank = out.size,
+                    mall = normalizeMall(obj.str("shopName").orEmpty().ifBlank { "쇼핑몰" }), link = link,
+                    shippingFee = obj.long("postPrice"),
+                )
+                continue
+            }
             val bundle = plain(obj.str("bundleName"))
-            val unit = UnitPrice.parse(obj.str("unitPrice"))
+            val unit = UnitPrice.parse(obj.str("unitPrice")) ?: UnitPrice.estimate("$name $bundle", price)
             val options = mutableListOf<LiveOption>()
             if (bundle.isNotEmpty()) options += LiveOption(pcode, bundle, price, obj.long("shopCount")?.toInt(), unit)
             (obj["bundleList"] as? JsonArray)?.forEach { b ->
@@ -139,7 +182,8 @@ object DanawaParser {
                 val bp = bo.str("productSeq") ?: return@forEach
                 val bprice = bo.long("minPrice") ?: return@forEach
                 if (bp != pcode && bprice > 0 && options.none { it.pcode == bp }) {
-                    options += LiveOption(bp, plain(bo.str("bundleName")), bprice, bo.long("shopCount")?.toInt(), UnitPrice.parse(bo.str("unitPrice")))
+                    val bl = plain(bo.str("bundleName"))
+                    options += LiveOption(bp, bl, bprice, bo.long("shopCount")?.toInt(), UnitPrice.parse(bo.str("unitPrice")) ?: UnitPrice.estimate("$name $bl", bprice))
                 }
             }
             out += LiveProduct(

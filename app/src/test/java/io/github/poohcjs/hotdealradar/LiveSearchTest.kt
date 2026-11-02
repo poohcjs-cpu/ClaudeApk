@@ -62,4 +62,34 @@ class LiveSearchTest {
         assertEquals("a\"b\\c/d\n<b>한</b>", DanawaParser.unescapeJsonString("a\\\"b\\\\c\\/d\\n\\u003cb\\u003e\\ud55c\\u003c/b\\u003e"))
         assertEquals("그대로", DanawaParser.unescapeJsonString("그대로"))
     }
+
+    /** '닥터노아 치약'처럼 가격비교 묶음 없이 쇼핑몰 개별 상품만 있는 검색 (예전 앱은 0개로 보였다) */
+    @Test fun readsMallListingsWhenNoPriceComparisonGroup() {
+        val list = DanawaParser.parseSearch(res("danawa_search_listings.html"))
+        assertEquals(6, list.size)
+        assertTrue(list.all { it.isListing && it.link.startsWith("https://prod.danawa.com/bridge/") })
+        val first = list.first()
+        assertEquals("G마켓", first.mall)
+        assertEquals(20400L, first.price)
+        assertEquals(0L, first.shippingFee)
+        assertTrue(first.image.startsWith("https://"))
+        // '60g 1개' 20,400원 → 10g당 약 3,400원 (이름으로 계산)
+        assertEquals(UnitPrice("3400원/10g", 3400, "10g", estimated = true), first.unit)
+        // '포도향 60g 3개' 35,250원 → 10g당 약 1,958원
+        assertEquals(1958L, list.first { it.pcode == "EE128_4846497285" }.unit!!.value)
+        // 단가 1위: '1450 고불소 … 60g 3개' 22,620원 → 10g당 약 1,257원 (1개짜리 18,000~20,000원보다 훨씬 싸다)
+        val best = sortLive(list, LiveSort.UNIT).first()
+        assertEquals("EE128_4869637309", best.pcode)
+        assertEquals(1257L, best.unit!!.value)
+    }
+
+    @Test fun estimatesUnitFromName() {
+        assertEquals(1958L, UnitPrice.estimate("포도향 60g 3개", 35250)!!.value)
+        assertEquals("100ml", UnitPrice.estimate("생수 2L 12병", 6000)!!.per)
+        assertEquals(25L, UnitPrice.estimate("생수 2L 12병", 6000)!!.value)
+        assertEquals(null, UnitPrice.estimate("에어팟 프로 2", 300000))
+        // '1개입 X 5개 세트' → 5개, '6개월'은 개수가 아님
+        assertEquals(1856L, UnitPrice.estimate("마루 키즈 치약 75g 1개입 X 5개 세트", 69590)!!.value)
+        assertEquals(1596L, UnitPrice.estimate("아기치약 돌 6개월 라즈베리 60g 3개 유아치약", 28730)!!.value)
+    }
 }

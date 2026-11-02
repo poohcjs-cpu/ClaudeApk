@@ -32,4 +32,11 @@ class LiveNetworkTest {
             assertTrue(list.isNotEmpty())
         }
     }
+
+    @Test fun drNoahToothpaste() = runBlocking {
+        val list = LiveSearchClient().search("닥터노아 치약")
+        println("[닥터노아 치약] 결과 ${list.size}개 (쇼핑몰 개별 상품 ${list.count { it.isListing }}개)")
+        sortLive(list, LiveSort.UNIT).take(5).forEach { println("   ${it.mall ?: "가격비교"} | ${it.name.take(40)} | ${it.price}원 | ${it.unit?.text}") }
+        assertTrue(list.isNotEmpty())
+    }
 }

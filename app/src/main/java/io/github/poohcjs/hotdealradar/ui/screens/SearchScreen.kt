@@ -73,6 +73,7 @@ import io.github.poohcjs.hotdealradar.ui.components.SortTabs
 import io.github.poohcjs.hotdealradar.ui.components.Tag
 import io.github.poohcjs.hotdealradar.ui.components.cardBg
 import io.github.poohcjs.hotdealradar.ui.theme.Brand
+import io.github.poohcjs.hotdealradar.ui.theme.Discover
 import io.github.poohcjs.hotdealradar.ui.theme.Good
 import io.github.poohcjs.hotdealradar.ui.theme.HD
 import io.github.poohcjs.hotdealradar.ui.theme.Warn
@@ -211,7 +212,12 @@ fun SearchScreen(
             else -> {
                 val top = sorted.first()
                 val topOpt = pickOption(top, sort)
-                item { BestPick(top, topOpt, sort, index) { onOpenLive(topOpt?.pcode ?: top.pcode) } }
+                fun openProduct(prod: LiveProduct, opt: LiveOption?) {
+                    // 쇼핑몰 개별 상품은 다나와 상품 페이지가 없으니 그 쇼핑몰로 바로 간다
+                    if (prod.isListing) context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(prod.link)))
+                    else onOpenLive(opt?.pcode ?: prod.pcode)
+                }
+                item { BestPick(top, topOpt, sort, index) { openProduct(top, topOpt) } }
                 item {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(top = 18.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         SortTabs(LiveSort.entries.map { it.name to it.label }, sort.name, { sortName = it })
@@ -232,7 +238,7 @@ fun SearchScreen(
                 }
                 items(sorted.drop(1), key = { "live-" + it.pcode }) { prod ->
                     val opt = pickOption(prod, sort)
-                    LiveRow(prod, opt, sort, index, fav = (opt?.pcode ?: prod.pcode) in favs) { onOpenLive(opt?.pcode ?: prod.pcode) }
+                    LiveRow(prod, opt, sort, index, fav = (opt?.pcode ?: prod.pcode) in favs) { openProduct(prod, opt) }
                 }
                 item { OtherSites(submitted) { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } }
             }
@@ -317,8 +323,9 @@ private fun BestPick(prod: LiveProduct, opt: LiveOption?, sort: LiveSort, index:
         }
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (unit != null) HeroChip("${unit.value}원 / ${unit.per}")
+            if (unit != null) HeroChip("${if (unit.estimated) "약 " else ""}${unit.value}원 / ${unit.per}")
             if (malls != null) HeroChip("쇼핑몰 ${malls}곳 비교")
+            if (prod.isListing) HeroChip("${prod.mall} · ${shippingText(prod.shippingFee)}")
             liveDeal(index, listOfNotNull(prod.pcode) + prod.options.map { it.pcode })?.let { d -> HeroChip("🔥 핫딜 ${pct(d.rate)}%↓") }
         }
     }
@@ -346,6 +353,7 @@ private fun LiveRow(prod: LiveProduct, opt: LiveOption?, sort: LiveSort, index: 
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (prod.isListing) Tag(prod.mall!!, Discover)
                 if (opt != null && opt.label.isNotBlank()) Tag(opt.label)
                 if (prod.overseas) Tag("해외구매", Warn)
                 if (prod.used) Tag("중고·리퍼", Warn)
@@ -360,12 +368,19 @@ private fun LiveRow(prod: LiveProduct, opt: LiveOption?, sort: LiveSort, index: 
                 if (unit != null) {
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        "${unit.value}원/${unit.per}", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+                        "${if (unit.estimated) "약 " else ""}${unit.value}원/${unit.per}", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
                         color = if (sort == LiveSort.UNIT) Good else p.sub, modifier = Modifier.padding(bottom = 1.dp),
                     )
                 }
             }
             if (malls != null) Text("쇼핑몰 ${malls}곳 중 최저가", fontSize = 11.5.sp, color = p.faint)
+            if (prod.isListing) Text("${prod.mall} 개별 상품 · ${shippingText(prod.shippingFee)} · 누르면 쇼핑몰로", fontSize = 11.5.sp, color = p.faint)
         }
     }
+}
+
+private fun shippingText(fee: Long?) = when {
+    fee == null -> "배송비 확인 필요"
+    fee == 0L -> "무료배송"
+    else -> "배송비 ${won(fee)}원"
 }

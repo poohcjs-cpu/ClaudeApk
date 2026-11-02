@@ -125,6 +125,15 @@ class ScreenshotTest {
         )
     }
 
+    @Test @Config(qualifiers = "w400dp-h1500dp-xxhdpi")
+    fun searchListings() = shot("6_search_listings", withBar = Tab.SEARCH) {
+        val list = DanawaParser.parseSearch(res("danawa_search_listings.html"))
+        SearchScreen(
+            index, s, favs, emptyList(), {}, LiveSearchState("닥터노아 치약", false, list, null, System.currentTimeMillis()), {}, {},
+            none, {}, {},
+        )
+    }
+
     @Test fun searchEmpty() = shot("6_search_empty", withBar = Tab.SEARCH) {
         SearchScreen(index, s, favs, listOf("에어팟", "생수 2L"), {}, LiveSearchState(), {}, {}, none, {}, {})
     }
