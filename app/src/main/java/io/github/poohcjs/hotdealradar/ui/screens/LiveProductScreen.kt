@@ -58,7 +58,7 @@ import io.github.poohcjs.hotdealradar.ui.theme.Discover
 import io.github.poohcjs.hotdealradar.ui.theme.Good
 import io.github.poohcjs.hotdealradar.ui.theme.HD
 
-/** 실시간 검색에서 연 상품: 다나와 상품 페이지의 쇼핑몰별 가격을 지금 읽어 보여 준다 */
+/** 실시간 검색에서 연 상품: 다나와(또는 에누리) 상품 페이지의 쇼핑몰별 가격을 지금 읽어 보여 준다 */
 @Composable
 fun LiveProductScreen(
     pcode: String,
@@ -90,7 +90,10 @@ fun LiveProductScreen(
     val cheapest = offers.firstOrNull()
     val price = cheapest?.let { if (withShipping) it.total else it.price } ?: option?.cost(withShipping) ?: product?.cost(withShipping)
     val unit = option?.unit ?: product?.unit
-    val danawaUrl = "https://prod.danawa.com/info/?pcode=$pcode"
+    // 에누리 가격비교 묶음('en:…')이면 에누리 화면, 아니면 다나와 화면
+    val enuri = io.github.poohcjs.hotdealradar.data.EnuriParser.isEnuri(pcode)
+    val siteName = if (enuri) "에누리" else "다나와"
+    val danawaUrl = if (enuri) io.github.poohcjs.hotdealradar.data.EnuriParser.catalogUrl(pcode) else "https://prod.danawa.com/info/?pcode=$pcode"
     val deal = index?.dealsByPcode?.get(pcode)?.filter { !it.ended }?.minByOrNull { it.price ?: Long.MAX_VALUE }
     val topInset = contentPadding.calculateTopPadding()
     val bottomInset = contentPadding.calculateBottomPadding()
@@ -104,7 +107,7 @@ fun LiveProductScreen(
             ) {
                 Column(Modifier.fillMaxWidth().background(p.card).padding(start = 22.dp, end = 22.dp, top = 24.dp, bottom = 22.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Tag("실시간 다나와 최저가", Discover)
+                        Tag("실시간 $siteName 최저가", Discover)
                         if (product?.overseas == true) Tag("해외구매")
                     }
                     Spacer(Modifier.height(12.dp))
@@ -211,7 +214,7 @@ fun LiveProductScreen(
                             Text("쇼핑몰 가격을 읽고 있어요", color = p.sub, fontSize = 14.sp)
                         }
                         state.error != null && offers.isEmpty() -> Text(state.error, color = p.sub, fontSize = 13.5.sp, lineHeight = 19.sp)
-                        offers.isEmpty() -> Text("판매처 목록을 읽지 못했어요. 다나와에서 직접 확인해 주세요.", color = p.sub, fontSize = 13.5.sp)
+                        offers.isEmpty() -> Text("판매처 목록을 읽지 못했어요. ${siteName}에서 직접 확인해 주세요.", color = p.sub, fontSize = 13.5.sp)
                         else -> {
                             val v = { o: io.github.poohcjs.hotdealradar.data.LiveOffer -> if (withShipping) o.total else o.price }
                             val min = offers.minOf(v)
@@ -283,7 +286,7 @@ fun LiveProductScreen(
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    if (cheapest != null) "${cheapest.mall}에서 사기" else "다나와에서 보기",
+                    if (cheapest != null) "${cheapest.mall.substringBefore(" (")}에서 사기" else "${siteName}에서 보기",
                     color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.width(6.dp))
@@ -294,7 +297,7 @@ fun LiveProductScreen(
                 Modifier.height(54.dp).clip(RoundedCornerShape(16.dp)).border(1.dp, p.line, RoundedCornerShape(16.dp))
                     .clickable { open(danawaUrl) }.padding(horizontal = 16.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text("다나와", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = p.ink) }
+            ) { Text(siteName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = p.ink) }
         }
     }
 }

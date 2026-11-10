@@ -125,6 +125,7 @@ fun App(
     val favs by vm.favs.collectAsStateWithLifecycle()
     val liveSearch by vm.liveSearch.collectAsStateWithLifecycle()
     val livePages by vm.livePages.collectAsStateWithLifecycle()
+    val linkState by vm.link.collectAsStateWithLifecycle()
     // 보던 화면 유지: 탭·열린 상세 화면을 화면 회전·앱 정리 뒤에도 되살리고(rememberSaveable),
     // 앱을 완전히 닫았어도 30분 안에 다시 열면 이어서 보여 준다(restoredNav)
     var tab by rememberSaveable { mutableStateOf(vm.restoredNav?.first?.let { n -> Tab.entries.firstOrNull { it.name == n } } ?: Tab.DEALS) }
@@ -245,6 +246,8 @@ fun App(
                             { stack.add("live:$it") }, pad, { stack.add(it.key) }, vm::toggleFav,
                             onSettings = vm::updateSettings, incomingQuery = pendingShare.value,
                             onIncomingHandled = { pendingShare.value = null },
+                            link = linkState, onOpenLink = vm::openLink, onClearLink = vm::clearLink,
+                            onRememberMall = vm::rememberLinkMall, onWatch = vm::watchKeyword,
                         )
                         Tab.SAVED -> SavedScreen(index, s, favs, pad, { item ->
                             // 실시간 검색에서 찜한 제품처럼 모아 둔 데이터에 없으면 실시간 화면으로

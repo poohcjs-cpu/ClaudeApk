@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 
@@ -123,6 +124,11 @@ class Prefs(context: Context) {
         return parts.firstOrNull()?.let { it to parts.drop(1) }
     }
 
+    /** 사용자가 공유로 알려 준 공식몰·자사몰 (검색할 때 함께 찾아본다) */
+    var userMalls: List<Mall>
+        get() = sp.getString(K_MALLS, null)?.let { runCatching { JSON.decodeFromString(ListSerializer(Mall.serializer()), it) }.getOrNull() } ?: emptyList()
+        set(v) = sp.edit { putString(K_MALLS, JSON.encodeToString(ListSerializer(Mall.serializer()), v.take(50))) }
+
     var recentSearches: List<String>
         get() = sp.getString(K_RECENT, null)?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
         set(v) = sp.edit { putString(K_RECENT, v.take(8).joinToString("\n")) }
@@ -137,5 +143,6 @@ class Prefs(context: Context) {
         private const val K_RECENT = "recentSearches"
         private const val K_NAV = "nav"
         private const val K_NAV_AT = "navAt"
+        private const val K_MALLS = "userMalls"
     }
 }

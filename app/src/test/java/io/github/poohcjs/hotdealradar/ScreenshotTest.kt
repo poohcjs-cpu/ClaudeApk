@@ -143,6 +143,57 @@ class ScreenshotTest {
         )
     }
 
+    /** 건봉국밥: 다나와·에누리·공식몰을 합쳐 공식몰이 1등, 커뮤니티 기록으로 '지금 사도 될까?' */
+    private fun gunbongResults(extra: List<io.github.poohcjs.hotdealradar.data.LiveProduct> = emptyList()): List<io.github.poohcjs.hotdealradar.data.LiveProduct> {
+        val en = io.github.poohcjs.hotdealradar.data.EnuriParser.parseSearch(res("enuri_search.html")).filter { "건봉" in it.name }
+        val rule = io.github.poohcjs.hotdealradar.data.ShipRule(3500, 50000)
+        val ml = io.github.poohcjs.hotdealradar.data.Cafe24Parser.parseSearch(res("cafe24_search.html"), io.github.poohcjs.hotdealradar.data.MallDirectory.SEED.first())
+            .map { it.copy(shippingFee = rule.feeFor(it.price), total = it.price + rule.feeFor(it.price)) }
+        val dn = listOf(
+            io.github.poohcjs.hotdealradar.data.LiveProduct("EE1", "1987 건봉 돼지국밥 1인분 950g", "", 17960, null,
+                io.github.poohcjs.hotdealradar.data.UnitPrice.estimate("950g", 17960), emptyList(), false, false, 0, mall = "11번가", link = "https://x", shippingFee = 3000, total = 20960),
+        )
+        return io.github.poohcjs.hotdealradar.data.mergeSources(dn, en, ml, extra)
+    }
+
+    private val gunbongHistory = io.github.poohcjs.hotdealradar.data.ArchiveSearch.history(
+        listOf(
+            io.github.poohcjs.hotdealradar.data.ArchiveItem("ppomppu:1", "2026-11-03T10:00", "ppomppu", "순천 건봉국밥 950g 6팩 무료배송", "건봉국밥", 54000, "u1", 0),
+            io.github.poohcjs.hotdealradar.data.ArchiveItem("ruliweb:2", "2026-11-07T21:00", "ruliweb", "건봉 돼지국밥 950g 3팩", "G마켓", 36900, "u2", 0),
+        ), "건봉국밥", "2026-11", 6,
+    )
+
+    private val gunbongSites = mapOf(
+        io.github.poohcjs.hotdealradar.data.LiveSource.DANAWA to io.github.poohcjs.hotdealradar.ui.SiteState(false, 34),
+        io.github.poohcjs.hotdealradar.data.LiveSource.ENURI to io.github.poohcjs.hotdealradar.ui.SiteState(false, 33),
+        io.github.poohcjs.hotdealradar.data.LiveSource.MALL to io.github.poohcjs.hotdealradar.ui.SiteState(false, 2),
+    )
+
+    @Test @Config(qualifiers = "w400dp-h2300dp-xxhdpi")
+    fun searchGunbong() = shot("6_search_gunbong", withBar = Tab.SEARCH) {
+        SearchScreen(
+            index, s, favs, emptyList(), {},
+            LiveSearchState("건봉국밥", false, gunbongResults(), null, System.currentTimeMillis(), asked = "건봉국밥 최저가",
+                sites = gunbongSites, malls = listOf("건봉국밥 공식몰"), history = gunbongHistory),
+            {}, {}, none, {}, {},
+        )
+    }
+
+    @Test @Config(qualifiers = "w400dp-h1600dp-xxhdpi")
+    fun searchSharedLink() = shot("6_search_link", withBar = Tab.SEARCH) {
+        val url = "https://gunbong1987.com/product/x/20/category/26/display/1/"
+        val info = io.github.poohcjs.hotdealradar.data.LinkReader.parse(res("cafe24_product.html"), url)
+        val mine = io.github.poohcjs.hotdealradar.data.LiveProduct("link:1", info.name, info.image, info.price!!, null, null, emptyList(), false, false, -1,
+            mall = info.site + " (공유한 링크)", link = url, shippingFee = info.fee, total = info.total, source = io.github.poohcjs.hotdealradar.data.LiveSource.MALL)
+        val results = gunbongResults(listOf(mine)).filter { it.source != io.github.poohcjs.hotdealradar.data.LiveSource.MALL || it.pcode == "link:1" }
+        SearchScreen(
+            index, s, favs, emptyList(), {},
+            LiveSearchState("순천건봉국밥", false, results, null, System.currentTimeMillis(), sites = gunbongSites, history = gunbongHistory),
+            {}, {}, none, {}, {},
+            link = io.github.poohcjs.hotdealradar.ui.LinkState(url, false, info, null, false),
+        )
+    }
+
     @Test @Config(qualifiers = "w400dp-h2400dp-xxhdpi")
     fun dealsKeywords() = shot("1_deals_keywords", withBar = Tab.DEALS) {
         DealsScreen(index, s.copy(keywords = listOf("버즈", "두유")), favs, cutoff, false, none, {}, {})

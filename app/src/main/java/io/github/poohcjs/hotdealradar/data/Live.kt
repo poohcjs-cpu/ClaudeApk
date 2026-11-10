@@ -53,25 +53,65 @@ data class UnitPrice(val text: String, val value: Long, val per: String, val est
 
         private val SIZE = Regex("""(\d+(?:\.\d+)?)\s*(kg|KG|Kg|g|G|ml|mL|ML|L|l|리터)(?![A-Za-z가-힣])""")
         // '6개월'은 개수가 아니다
-        private val COUNT = Regex("""(\d+)\s*(개입|개(?!월)|입|팩|EA|ea|병|통|박스|세트)""")
+        private val COUNT = Regex("""(\d+)\s*(개입|개(?!월)|입|팩|EA|ea|병|통|박스|세트|캔|봉|포)""")
+        // '4+1팩', '1+1' → 5개, 2개
+        private val PLUS = Regex("""(\d{1,2})\s*\+\s*(\d{1,2})(?!\s*(?:g|G|ml|mL|kg|L|l|mm|cm|%|\d))""")
+        // '500ml x 24', '1kg×2'
+        private val TIMES = Regex("""[xX×*]\s*(\d{1,3})(?!\s*(?:g|G|ml|mL|kg|L|l|mm|cm|m(?![a-z])|\d|개|입|팩|EA|ea|병|통|박스|세트|캔|봉|포))""")
 
-        /** 이름의 '60g 3개' → 가격을 10g당(액체는 100ml당)으로. 다나와 단가와 같은 단위를 쓴다 */
+        private data class Size(val amount: Double, val liquid: Boolean, val range: IntRange)
+
+        private fun sizes(name: String): List<Size> = SIZE.findAll(name).mapNotNull { m ->
+            var v = m.groupValues[1].toDoubleOrNull() ?: return@mapNotNull null
+            val u = m.groupValues[2].lowercase()
+            if (u == "kg" || u == "l" || u == "리터") v *= 1000
+            if (v <= 0) null else Size(v, u == "ml" || u == "l" || u == "리터", m.range)
+        }.toList()
+
+        /** 이름에 나온 개수: 'N+M' 은 더하고, 용량 뒤의 'N개'·'xN' 은 곱한다. from: 이 위치 뒤의 개수만 */
+        internal fun pieces(name: String, from: Int = -1): Int? {
+            val plus = PLUS.findAll(name).firstOrNull { (it.groupValues[1].toIntOrNull() ?: 0) in 1..50 && (it.groupValues[2].toIntOrNull() ?: 0) in 1..50 }
+            val plusCount = plus?.let { it.groupValues[1].toInt() + it.groupValues[2].toInt() }
+            val counts = (COUNT.findAll(name, from + 1) + TIMES.findAll(name, from + 1))
+                .filter { m -> plus == null || m.range.first > plus.range.last || m.range.last < plus.range.first }
+                .mapNotNull { it.groupValues[1].toIntOrNull()?.takeIf { n -> n in 1..500 } }.toList()
+            if (plusCount == null && counts.isEmpty()) return null
+            return (counts.fold(1) { a, b -> a * b } * (plusCount ?: 1)).coerceIn(1, 1000)
+        }
+
+        /** 이름의 '60g 3개' → 가격을 10g당(액체는 100ml당)으로. 다나와 단가와 같은 단위를 쓴다.
+         *  용량이 여럿이면('건더기250g+육수350g … 950g') 가장 큰 값을 한 개의 용량으로 본다. */
         fun estimate(name: String, price: Long): UnitPrice? {
-            val sm = SIZE.find(name) ?: return null
-            var size = sm.groupValues[1].toDoubleOrNull() ?: return null
-            val unit = sm.groupValues[2].lowercase()
-            val liquid = unit == "ml" || unit == "l" || unit == "리터"
-            if (unit == "kg" || unit == "l" || unit == "리터") size *= 1000
-            // 용량 뒤에 나오는 개수를 곱한다: '75g 1개입 X 5개 세트' → 1 × 5
-            val count = COUNT.findAll(name, sm.range.last).mapNotNull { it.groupValues[1].toIntOrNull()?.takeIf { n -> n in 1..500 } }
-                .fold(1) { a, b -> a * b }.coerceIn(1, 1000)
-            val total = size * count
-            if (total <= 0) return null
+            val all = sizes(name)
+            val size = all.maxByOrNull { it.amount } ?: return null
+            val count = pieces(name, size.range.last) ?: 1
+            return fromAmount(size.amount * count, size.liquid, price)
+        }
+
+        internal fun fromAmount(amount: Double, liquid: Boolean, price: Long, estimated: Boolean = true): UnitPrice? {
+            if (amount <= 0 || price <= 0) return null
             val per = if (liquid) "100ml" else "10g"
             val base = if (liquid) 100.0 else 10.0
-            val v = Math.round(price / (total / base))
-            return UnitPrice("${v}원/$per", v, per, estimated = true)
+            val v = Math.round(price / (amount / base))
+            if (v <= 0) return null
+            return UnitPrice("${v}원/$per", v, per, estimated = estimated)
         }
+
+        /** 용량이 한 번만, 개수는 그 뒤에만 나오는 깔끔한 이름이면 '한 개의 용량' (같은 상품끼리 비교할 때 기준) */
+        internal fun cleanPieceSize(name: String): Pair<Double, Boolean>? {
+            val all = sizes(name)
+            if (all.size != 1) return null
+            val s = all[0]
+            if (PLUS.containsMatchIn(name)) return null
+            // '2팩 3세트 2850g'처럼 개수가 용량 앞에 오면 용량이 전체인지 한 개인지 알 수 없어 뺀다
+            val before = COUNT.findAll(name).any { it.range.last < s.range.first }
+            if (before) return null
+            // '950g 3개'의 950g이 한 개의 용량
+            return s.amount to s.liquid
+        }
+
+        /** 용량 없이 개수만 있는 이름 ('순천건봉국밥 4+1팩') */
+        internal fun countOnly(name: String): Int? = if (sizes(name).isEmpty()) pieces(name) else null
     }
 
     /** 배송비를 더한 값으로 단가를 다시 계산 (단가는 상품가 기준이라 같은 비율로 늘린다) */
@@ -102,6 +142,9 @@ data class LiveProduct(
     val total: Long? = null,
     /** 다나와 분류의 마지막 단계 (예: '치약', '칫솔/치실') */
     val category: String = "",
+    val source: LiveSource = LiveSource.DANAWA,
+    /** 단가를 같은 상품의 다른 판매처 용량으로 짐작했을 때 그 근거 (예: '950g × 5팩') */
+    val unitNote: String? = null,
 ) {
     val isListing: Boolean get() = mall != null
     fun cost(withShipping: Boolean) = if (withShipping) total ?: price else price
@@ -133,7 +176,10 @@ data class LivePage(
 
 class LiveBlocked(message: String) : IOException(message)
 
-enum class LiveSort(val label: String) { UNIT("단가 낮은 순"), PRICE("가격 낮은 순"), RANK("다나와 추천순") }
+enum class LiveSort(val label: String) { UNIT("단가 낮은 순"), PRICE("가격 낮은 순"), RANK("추천순") }
+
+/** 결과를 어디서 찾았는지 */
+enum class LiveSource(val label: String) { DANAWA("다나와"), ENURI("에누리"), MALL("공식몰") }
 
 /** 정렬에 맞는 대표 옵션: 단가순이면 단가가 가장 낮은 묶음, 가격순이면 가장 싼 묶음 */
 fun pickOption(p: LiveProduct, sort: LiveSort, withShipping: Boolean = false): LiveOption? = when (sort) {
@@ -161,6 +207,64 @@ fun sortLive(list: List<LiveProduct>, sort: LiveSort, withShipping: Boolean = fa
                 .thenBy { if (common != null && unitOf(it)?.per == common) unitOf(it)!!.value else shownCost(it, sort, withShipping) },
         )
     }
+}
+
+private val GENERIC = setOf(
+    "무료배송", "무배", "무료", "배송", "정품", "국내산", "대용량", "특가", "할인", "세트", "기획", "증정", "오늘출발", "당일발송", "같은",
+    "인분", "1인분", "2인분", "식사", "간편", "한식", "혼밥", "점심", "외식", "선물", "추천", "인기", "공식", "공식몰", "본사", "판매",
+)
+private val WORD = Regex("""[가-힣A-Za-z][가-힣A-Za-z0-9]+""")
+
+/** 이름에서 상품을 가리키는 낱말 (숫자·용량·흔한 광고 문구 빼고) */
+internal fun productWords(name: String): Set<String> =
+    WORD.findAll(name).map { it.value }.filter { w -> w.length >= 2 && w !in GENERIC && !w.any { it.isDigit() } }.toSet()
+
+/**
+ * 용량 없이 '4+1팩'처럼 개수만 적은 상품(주로 공식몰)은 단가를 낼 수 없다.
+ * 같은 낱말을 쓰는 다른 판매처 상품 대부분이 같은 한 개 용량(예: 950g)이라고 하면, 그 용량으로 단가를 짐작해 함께 비교한다.
+ * 다른 판매처끼리 한 개 용량이 제각각이면(70% 넘게 같지 않으면) 짐작하지 않는다.
+ */
+fun inferUnits(list: List<LiveProduct>): List<LiveProduct> {
+    data class Peer(val words: Set<String>, val compact: String, val each: Double, val liquid: Boolean)
+    val peers = list.mapNotNull { p ->
+        val (each, liquid) = UnitPrice.cleanPieceSize(p.name) ?: return@mapNotNull null
+        Peer(productWords(p.name), p.name.replace(" ", ""), each, liquid)
+    }
+    if (peers.size < 2) return list
+    return list.map { p ->
+        if (p.unit != null || p.options.any { it.unit != null }) return@map p
+        val n = UnitPrice.countOnly(p.name) ?: return@map p
+        val words = productWords(p.name)
+        val compact = p.name.replace(" ", "")
+        val same = peers.filter { peer -> words.any { it in peer.compact } || peer.words.any { it in compact } }
+        if (same.size < 2 || same.map { it.liquid }.toSet().size != 1) return@map p
+        // 대부분(70% 이상)이 같은 한 개 용량(±10%)이어야 한다. 이름이 잘린 몇 개('…건더기250g')는 무시
+        val (each, agree) = same.map { c -> c.each to same.count { o -> o.each in c.each / 1.1..c.each * 1.1 } }.maxByOrNull { it.second } ?: return@map p
+        if (agree < 2 || agree < same.size * 0.7) return@map p
+        val unit = UnitPrice.fromAmount(each * n, same[0].liquid, p.price) ?: return@map p
+        val sizeText = if (same[0].liquid) "${each.toLong()}ml" else if (each >= 1000 && each % 1000 == 0.0) "${(each / 1000).toLong()}kg" else "${each.toLong()}g"
+        p.copy(unit = unit, unitNote = "다른 판매처의 같은 상품이 한 개 $sizeText → $sizeText × ${n}개로 계산")
+    }
+}
+
+private fun nameKey(name: String) = name.lowercase().replace(Regex("[^0-9a-z가-힣]"), "")
+
+/**
+ * 다나와·에누리·공식몰 결과를 하나로. 에누리 결과 중 다나와와 같은 가격비교 묶음(이름이 같음)이나
+ * 같은 쇼핑몰·같은 가격·같은 이름의 개별 상품은 뺀다. 추천순은 공식몰 → 다나와 → 에누리를 번갈아.
+ * extra: 공유받은 링크 상품처럼 함께 비교할 것
+ */
+fun mergeSources(danawa: List<LiveProduct>, enuri: List<LiveProduct>, malls: List<LiveProduct>, extra: List<LiveProduct> = emptyList()): List<LiveProduct> {
+    val catalogs = danawa.filter { !it.isListing }.map { nameKey(it.name) }.toHashSet()
+    val listingKey = { p: LiveProduct -> "${p.mall?.substringBefore(" (")}|${p.price}|${nameKey(p.name).take(24)}" }
+    val listings = danawa.filter { it.isListing }.map(listingKey).toHashSet()
+    val en = enuri.filter { p -> if (p.isListing) listingKey(p) !in listings else nameKey(p.name) !in catalogs }
+    val out = ArrayList<LiveProduct>(danawa.size + en.size + malls.size + extra.size)
+    extra.forEachIndexed { i, p -> out += p.copy(rank = -extra.size + i) }
+    malls.forEachIndexed { i, p -> out += p.copy(rank = i * 3) }
+    danawa.forEachIndexed { i, p -> out += p.copy(rank = i * 3 + 1) }
+    en.forEachIndexed { i, p -> out += p.copy(rank = i * 3 + 2) }
+    return inferUnits(out.distinctBy { it.pcode })
 }
 
 /** 단위 정보가 절반 이상 있으면 단가순이 기본 */
@@ -393,58 +497,114 @@ object DanawaParser {
         }
     }
 
-    private val MALL_ALIAS = mapOf("SSG.COM" to "SSG닷컴", "신세계몰" to "SSG닷컴", "지마켓" to "G마켓", "롯데온" to "롯데ON")
-    private fun normalizeMall(s: String) = MALL_ALIAS[s] ?: s
+    private fun normalizeMall(s: String) = normalizeMallName(s)
 
     private fun String.digits(): Long? = filter { it.isDigit() }.toLongOrNull()
     private fun JsonObject.str(k: String): String? = (this[k] as? JsonPrimitive)?.contentOrNull
     private fun JsonObject.long(k: String): Long? = (this[k] as? JsonPrimitive)?.let { it.longOrNull ?: it.contentOrNull?.filter { c -> c.isDigit() }?.toLongOrNull() }
 }
 
-/** 다나와에 직접 묻는 부분. 화면에서 검색·상품 열기를 할 때만 부른다 */
+/** 다나와·에누리·공식몰에 직접 묻는 부분. 화면에서 검색·상품 열기를 할 때만 부른다 */
 class LiveSearchClient(private val client: OkHttpClient = defaultClient()) {
     private data class Cached<T>(val at: Long, val value: T)
     private val searches = HashMap<String, Cached<List<LiveProduct>>>()
     private val pages = HashMap<String, Cached<LivePage>>()
+    private val robots = HashMap<String, Cached<Robots?>>()
+    private val ships = HashMap<String, Cached<ShipRule?>>()
     private val gate = Mutex()
     private val lastAt = HashMap<String, Long>()
 
-    /** page: 1쪽부터. 한 쪽에 40개 안팎 */
-    suspend fun search(query: String, page: Int = 1): List<LiveProduct> {
-        val q = query.trim()
-        val key = "$q#$page"
-        searches[key]?.takeIf { fresh(it.at) }?.let { return it.value }
-        val url = "https://search.danawa.com/?query=" + URLEncoder.encode(q, "UTF-8") + if (page > 1) "&page=$page" else ""
-        val list = DanawaParser.parseSearch(get(url))
-        searches[key] = Cached(System.currentTimeMillis(), list)
-        return list
+    /** 다나와 검색. page: 1쪽부터, 한 쪽에 40개 안팎 */
+    suspend fun search(query: String, page: Int = 1): List<LiveProduct> = cached("d:${query.trim()}#$page") {
+        val url = "https://search.danawa.com/?query=" + URLEncoder.encode(query.trim(), "UTF-8") + if (page > 1) "&page=$page" else ""
+        DanawaParser.parseSearch(get(url, "다나와"))
     }
 
+    /** 에누리 검색. 한 쪽에 30~40개 */
+    suspend fun enuriSearch(query: String, page: Int = 1): List<LiveProduct> = cached("e:${query.trim()}#$page") {
+        val url = "https://price.enuri.com/search?keyword=" + URLEncoder.encode(query.trim(), "UTF-8") + if (page > 1) "&page=$page" else ""
+        EnuriParser.parseSearch(get(url, "에누리"))
+    }
+
+    /**
+     * 공식몰 검색 (카페24). robots.txt가 검색 화면을 허용할 때만 읽는다.
+     * 첫 상품의 상품 페이지에서 배송비 규칙을 읽어 그 쇼핑몰 상품 모두에 적용한다 (쇼핑몰마다 규칙이 하나인 경우가 대부분).
+     */
+    suspend fun mallSearch(mall: Mall, keyword: String): List<LiveProduct> = cached("m:${mall.host}:${keyword.trim()}") {
+        val url = Cafe24Parser.searchUrl(mall.host, keyword.trim())
+        if (!robotsAllow(url)) return@cached emptyList()
+        val list = Cafe24Parser.parseSearch(get(url, mall.label), mall).take(12)
+        val first = list.firstOrNull() ?: return@cached list
+        val rule = shipRule(mall.host, first.link)
+        if (rule == null) list else list.map { it.copy(shippingFee = rule.feeFor(it.price), total = it.price + rule.feeFor(it.price)) }
+    }
+
+    private suspend fun shipRule(host: String, productUrl: String): ShipRule? {
+        ships[host]?.takeIf { System.currentTimeMillis() - it.at < 6 * 3_600_000L }?.let { return it.value }
+        val rule = if (robotsAllow(productUrl)) runCatching { ShipRule.parse(Jsoup.parse(get(productUrl, host)).text()) }.getOrNull() else null
+        ships[host] = Cached(System.currentTimeMillis(), rule)
+        return rule
+    }
+
+    /** 공유받은 상품 링크 읽기 (사용자가 보낸 한 페이지만, robots.txt가 막지 않을 때) */
+    suspend fun readLink(url: String): LinkInfo {
+        if (!robotsAllow(url)) throw LiveBlocked("이 쇼핑몰은 자동으로 읽는 것을 허용하지 않아요")
+        return LinkReader.parse(get(url, LinkReader.hostOf(url)), url)
+    }
+
+    /** 다나와(숫자) 또는 에누리('en:…') 가격비교 상품 페이지 */
     suspend fun product(pcode: String): LivePage {
         pages[pcode]?.takeIf { fresh(it.at) }?.let { return it.value }
-        val page = DanawaParser.parseProduct(get("https://prod.danawa.com/info/?pcode=$pcode"), pcode)
+        val page = if (EnuriParser.isEnuri(pcode)) EnuriParser.parseCatalog(get(EnuriParser.catalogUrl(pcode), "에누리"), pcode)
+        else DanawaParser.parseProduct(get("https://prod.danawa.com/info/?pcode=$pcode", "다나와"), pcode)
         pages[pcode] = Cached(System.currentTimeMillis(), page)
         return page
     }
 
+    private suspend fun cached(key: String, load: suspend () -> List<LiveProduct>): List<LiveProduct> {
+        searches[key]?.takeIf { fresh(it.at) }?.let { return it.value }
+        val list = load()
+        searches[key] = Cached(System.currentTimeMillis(), list)
+        return list
+    }
+
     private fun fresh(at: Long) = System.currentTimeMillis() - at < CACHE_MS
 
-    private suspend fun get(url: String): String {
-        val host = url.substringAfter("://").substringBefore('/')
-        gate.withLock {
-            val wait = (lastAt[host] ?: 0L) + MIN_GAP_MS - System.currentTimeMillis()
-            if (wait > 0) delay(wait)
-            lastAt[host] = System.currentTimeMillis()
+    /** robots.txt 확인 (사이트마다 하루 한 번). 없으면(404) 허용, 읽지 못하면 읽지 않는다 */
+    private suspend fun robotsAllow(url: String): Boolean {
+        val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return false
+        val origin = "${uri.scheme}://${uri.host}"
+        val r = robots[origin]?.takeIf { System.currentTimeMillis() - it.at < 24 * 3_600_000L }?.value ?: run {
+            val text = runCatching { getRaw("$origin/robots.txt", allowMissing = true) }.getOrElse { return false }
+            Robots(text).also { robots[origin] = Cached(System.currentTimeMillis(), it) }
         }
+        return r.allowed((uri.rawPath ?: "/").ifEmpty { "/" } + (uri.rawQuery?.let { "?$it" } ?: ""))
+    }
+
+    private suspend fun get(url: String, site: String): String =
+        getRaw(url, site = site) ?: throw IOException("HTTP 404")
+
+    /** allowMissing: 404면 null (robots.txt가 없는 사이트) */
+    private suspend fun getRaw(url: String, allowMissing: Boolean = false, site: String = ""): String? {
+        val host = url.substringAfter("://").substringBefore('/')
+        // 같은 사이트에는 요청 사이를 띄운다 (다른 사이트끼리는 기다리지 않게 자리만 잡고 밖에서 기다림)
+        val wait = gate.withLock {
+            val now = System.currentTimeMillis()
+            val next = maxOf(now, (lastAt[host] ?: 0L) + MIN_GAP_MS)
+            lastAt[host] = next
+            next - now
+        }
+        if (wait > 0) delay(wait)
         return withContext(Dispatchers.IO) {
             val req = Request.Builder().url(url)
                 .header("User-Agent", UA)
                 .header("Accept-Language", "ko-KR,ko;q=0.9")
                 .build()
             client.newCall(req).execute().use { resp ->
+                if (allowMissing && resp.code in 400..499 && resp.code !in listOf(403, 429)) return@use null
                 val body = resp.body.string()
                 if (resp.code in listOf(403, 429, 430, 451) || CHALLENGE.any { it in body.take(6000) }) {
-                    throw LiveBlocked("다나와가 지금은 자동 요청을 받지 않아요")
+                    throw LiveBlocked("${site.ifBlank { "사이트" }}가 지금은 자동 요청을 받지 않아요")
                 }
                 if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
                 body
