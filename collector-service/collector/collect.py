@@ -16,7 +16,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-from . import danawa, store
+from . import archive, danawa, store
 from .community import SOURCE_BY_ID, extract_body_price
 from .compare import market_deal, match_deal, verify_deal
 from .danawa import Candidate, Option
@@ -63,6 +63,7 @@ class Run:
             self.state.setdefault(k, {})
         self.community = store.read_json(root / "data" / "community.json", {}).get("posts", {})
         self.products = store.read_json(root / "data" / "products.json", {})
+        self.malls = store.read_json(root / "data" / "malls.json", {}).get("malls", {})
         self.history_rows: list[dict] = []
         self.summary = {"at": self.now_iso, "sources": {}, "verified": 0, "nomatch": 0, "pages": 0, "searches": 0,
                         "newPosts": 0, "keywordsRefreshed": 0, "stoppedBy": None}
@@ -216,6 +217,47 @@ class Run:
             post["verify"] = ({"status": "skipped", "reason": SKIP_REASONS[reason], "code": reason} if reason
                               else {"status": "pending"})
             self.summary["bodyPrices"] = self.summary.get("bodyPrices", 0) + 1
+
+    # ── 1-2. 딜 글에 걸린 쇼핑몰 링크로 공식몰·자사몰 주소록 만들기 ──────
+    def learn_malls(self) -> None:
+        """새 글 페이지를 한 번씩 읽어 본문 링크가 카페24 같은 자사몰이면 주소록(malls.json)에 넣는다.
+        앱이 그 쇼핑몰을 직접 검색해 다나와·에누리에 없는 공식몰 가격도 비교할 수 있게."""
+        opt = self.cfg["community"].get("learn_malls") or {}
+        sources = set(opt.get("sources", ["ruliweb", "clien"]))
+        limit = int(opt.get("max_per_run", 10))
+        if not sources or limit <= 0:
+            return
+        queue = [p for p in self.community.values()
+                 if p["source"] in sources and not p.get("linksChecked") and p.get("price")]
+        queue.sort(key=lambda p: p.get("postedAt", ""), reverse=True)
+        stopped: set = set()
+        done = 0
+        for post in queue:
+            if done >= limit:
+                break
+            if post["source"] in stopped:
+                continue
+            try:
+                resp = self.client.get(post["url"])
+            except BudgetExceeded:
+                self.summary["stoppedBy"] = "budget"
+                return
+            except FetchError:
+                stopped.add(post["source"])
+                continue
+            done += 1
+            post["linksChecked"] = self.now_iso
+            base = (post["url"].split("/")[2] if "://" in post["url"] else "").split(".", 1)[-1]
+            try:
+                links = archive.shop_links(resp.text(), base)
+            except Exception:
+                continue
+            for link in links:
+                host = archive.learn_mall(self.malls, link, post, self.now_iso)
+                if host:
+                    post["shop"] = host
+                    self.summary["mallsLearned"] = self.summary.get("mallsLearned", 0) + 1
+                    break
 
     def _prune_posts(self) -> None:
         keep = timedelta(hours=float(self.cfg["community"].get("keep_hours", 72)))
@@ -466,6 +508,10 @@ class Run:
         store.write_json(self.root / "data" / "state.json", self.state)
         store.write_json(self.root / "data" / "community.json", {"posts": self.community})
         store.write_json(self.root / "data" / "products.json", self.products)
+        # 커뮤니티 글은 72시간만 두지만, 가격 기록은 달별 파일로 오래 남긴다 (앱의 '지난 핫딜 가격')
+        months = int(self.cfg["storage"].get("archive_months", 24))
+        self.summary["archived"] = archive.update_archive(self.root, self.community, self.now, months)
+        store.write_json(self.root / "data" / "malls.json", {"version": 1, "updatedAt": self.now_iso, "malls": self.malls})
         if self.history_rows:
             store.append_history(self.root, self.history_rows)
         store.prune_history(self.root, self.now.date(), int(self.cfg["storage"].get("history_days", 120)))
@@ -477,6 +523,7 @@ class Run:
     def run(self) -> dict:
         self.fetch_community()
         self.fill_prices_from_body()
+        self.learn_malls()
         if self.danawa_ok:
             self.verify_posts()
         self.ensure_watch()

@@ -6,6 +6,8 @@
   data/state.json            출처별 수집 상태, 다나와 검색 캐시, 키워드 갱신 시각
   data/history/YYYY-MM.csv   제품별 가격 기록 (최저가·평균가·쇼핑몰 수)
   data/notified.json         텔레그램으로 이미 알린 딜
+  data/archive/YYYY-MM.json  커뮤니티 딜 가격 기록 (앱의 '지난 핫딜 가격', archive_months 동안 보관)
+  data/malls.json            딜 글 링크로 알게 된 공식몰·자사몰 주소록 (앱이 직접 검색)
   docs/data/deals.json       앱이 읽는 결과 (build.py)
 """
 from __future__ import annotations

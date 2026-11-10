@@ -48,7 +48,8 @@
     "keep_hours": 72,
     "max_posts": 500,
     "verify_overseas": false,
-    "body_price": { "sources": ["clien", "damoang"], "max_per_run": 8 }
+    "body_price": { "sources": ["clien", "damoang"], "max_per_run": 8 },
+    "learn_malls": { "sources": ["ruliweb", "clien", "damoang"], "max_per_run": 10 }
   },
 
   "danawa": {
@@ -78,7 +79,8 @@
   },
 
   "storage": {
-    "history_days": 120
+    "history_days": 120,
+    "archive_months": 24
   },
 
   "alerts": {
