@@ -24,7 +24,7 @@ class LiveNetworkTest {
         top.forEach { p -> val o = pickOption(p, LiveSort.UNIT); println("  ${p.name} ${o?.label} ${o?.price}원 ${o?.unit?.text} 쇼핑몰 ${o?.malls}곳") }
         val pc = pickOption(top.first(), LiveSort.UNIT)?.pcode ?: top.first().pcode
         val page = c.product(pc)
-        println("상품 ${page.name}: 판매처 ${page.offers.size}곳, 최저 ${page.offers.firstOrNull()}")
+        println("상품 $pc ${page.name}: 판매처 ${page.offers.size}곳, 최저 ${page.offers.firstOrNull()}")
         assertTrue(page.offers.isNotEmpty())
     }
 

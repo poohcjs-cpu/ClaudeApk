@@ -305,6 +305,12 @@ def parse_product(html: str, pcode: str) -> ProductPage:
         if page.image.startswith("//"):
             page.image = "https:" + page.image
 
+    if not page.offers and "__next_f" in html:
+        offers = _offers_next(html)
+        if offers:
+            page.offers = offers
+            strategies.append("next-sections")
+
     if not page.offers:
         for name, fn in (("list-item", _offers_list_item), ("diff_item", _offers_diff_item), ("generic", _offers_generic)):
             offers = fn(soup)
@@ -327,6 +333,35 @@ def parse_product(html: str, pcode: str) -> ProductPage:
         page.lowest = min([o.price for o in page.offers] + ([page.lowest] if page.lowest else []))
     page.strategy = "+".join(strategies) or "none"
     return page
+
+
+def _offers_next(html: str) -> list[Offer]:
+    """2026-11-10부터의 새 상품 화면: 판매처 목록이 {"sections":[{"items":[…]}], "officialMalls":[…]} 데이터로 실려 온다.
+    카드 결제 조건가(cardPrice)는 따로 있는 칸이라 판매가(rawPrice)만 쓴다."""
+    payload = _next_payload(html)
+    at = payload.find('{"sections":[')
+    if at < 0:
+        return []
+    try:
+        root, _ = json.JSONDecoder().raw_decode(payload, at)
+    except json.JSONDecodeError:
+        return []
+    items = [it for sec in root.get("sections") or [] if isinstance(sec, dict) for it in sec.get("items") or []]
+    items += [it for it in root.get("officialMalls") or [] if isinstance(it, dict)]
+    out = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        mall = normalize_mall(str(it.get("shop") or "").strip())
+        price = _int(it.get("rawPrice")) or _int(it.get("price"))
+        if not mall or not price or price < 100:
+            continue
+        fee = _int(it.get("deliveryPrice"))
+        if fee is None and _int(it.get("rawPriceWithDelivery")):
+            fee = max(0, _int(it.get("rawPriceWithDelivery")) - price)
+        ship = "무료배송" if fee == 0 else (f"배송비 {fee:,}원" if fee else str(it.get("delivery") or ""))
+        out.append(Offer(mall, price, ship, fee))
+    return out
 
 
 def _jsonld_product(soup) -> dict | None:

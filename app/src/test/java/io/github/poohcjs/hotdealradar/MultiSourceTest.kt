@@ -120,6 +120,17 @@ class MultiSourceTest {
         assertEquals(listOf("1", "enp:2"), merged.map { it.pcode })
     }
 
+    // ── 다나와 새 상품 화면 (2026-11-10부터) ──
+    @Test fun parsesNewDanawaProductPage() {
+        val page = io.github.poohcjs.hotdealradar.data.DanawaParser.parseProduct(res("danawa_product_next.html"), "3630770")
+        assertEquals("모나리자 점보롤 2겹 300m (16롤)", page.name)
+        assertEquals(listOf("11번가", "롯데ON", "옥션", "현대Hmall"), page.offers.map { it.mall }) // 쇼핑몰마다 가장 싼 것
+        assertEquals(16860L, page.offers.first().price)
+        assertEquals(19870L, page.offers[1].total)
+        assertTrue(page.offers.first().link.contains("loadingBridge"))
+        assertEquals(15900L, page.cardOffers.single().price)
+    }
+
     // ── 공식몰 (카페24) ──
     @Test fun parsesCafe24SearchAndShipping() {
         val mall = MallDirectory.SEED.first()

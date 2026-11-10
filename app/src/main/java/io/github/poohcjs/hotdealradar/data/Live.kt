@@ -447,7 +447,9 @@ object DanawaParser {
 
         val best = LinkedHashMap<String, LiveOffer>()
         val cards = LinkedHashMap<String, CardOffer>()
-        for (row in doc.select("li.list-item")) {
+        // 2026-11 새 상품 화면(Next.js): 판매처 목록이 {"sections":[{"items":[…]}]} 데이터로 실려 온다
+        if (html.contains("__next_f")) newOffers(html, best, cards)
+        if (best.isEmpty()) for (row in doc.select("li.list-item")) {
             if (row.selectFirst(".box__logo, [class*=logo]") == null) continue
             if (row.parents().any { it.hasClass("list__membership") }) {
                 // '○○카드 결제 시' 가격: 판매가 비교에서는 빼고 참고용으로 따로 모은다
@@ -476,6 +478,39 @@ object DanawaParser {
             cards.values.sortedBy { it.price },
         )
     }
+
+    private fun newOffers(html: String, best: LinkedHashMap<String, LiveOffer>, cards: LinkedHashMap<String, CardOffer>) {
+        val payload = buildString { for (raw in pushedStrings(html)) append(unescapeJsonString(raw)) }
+        val at = payload.indexOf("{\"sections\":[")
+        if (at < 0) return
+        val end = objectEnd(payload, at)
+        if (end <= at) return
+        val root = runCatching { JSON.parseToJsonElement(payload.substring(at, end)).jsonObject }.getOrNull() ?: return
+        val items = (root["sections"] as? JsonArray).orEmpty().flatMap { sec -> ((sec as? JsonObject)?.get("items") as? JsonArray).orEmpty() } +
+            (root["officialMalls"] as? JsonArray).orEmpty()
+        for (el in items) {
+            val o = el as? JsonObject ?: continue
+            val mall = normalizeMall(o.str("shop")?.trim().orEmpty())
+            if (mall.isBlank()) continue
+            val price = o.long("rawPrice")?.takeIf { it >= 100 } ?: o.str("price")?.digits() ?: continue
+            val fee = o.long("deliveryPrice") ?: o.long("rawPriceWithDelivery")?.let { it - price }?.takeIf { it >= 0 }
+            val ship = when {
+                fee == 0L -> "무료배송"
+                fee != null -> "배송비 ${won(fee)}원"
+                else -> o.str("delivery").orEmpty()
+            }
+            val link = o.str("productUrl").orEmpty().let { if (it.startsWith("//")) "https:$it" else it }
+            val cur = best[mall]
+            if (cur == null || price < cur.price) best[mall] = LiveOffer(mall, price, ship, fee, link)
+            val card = o.str("cardPrice")?.digits()?.takeIf { it in 100 until price }
+            if (card != null) {
+                val key = "$mall|카드"
+                if ((cards[key]?.price ?: Long.MAX_VALUE) > card) cards[key] = CardOffer(mall, card, "카드 결제 시", link)
+            }
+        }
+    }
+
+    private fun JsonArray?.orEmpty(): List<kotlinx.serialization.json.JsonElement> = this ?: emptyList()
 
     private fun mallOf(row: Element): String {
         row.selectFirst(".box__logo img[alt], [class*=logo] img[alt]")?.attr("alt")?.trim()?.takeIf { it.isNotEmpty() }?.let { return normalizeMall(it) }

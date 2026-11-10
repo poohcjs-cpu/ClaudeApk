@@ -94,6 +94,15 @@ class DanawaTest(unittest.TestCase):
         self.assertEqual(malls, ["쿠팡", "G마켓", "SSG닷컴", "11번가", "롯데ON"])  # G마켓은 더 싼 값 하나만
         self.assertEqual(page.offers[2].shipping_fee, 3000)
 
+    def test_product_next_sections(self):
+        # 2026-11-10 개편: 판매처 목록이 화면 데이터(self.__next_f)의 sections로 실려 온다
+        page = danawa.parse_product(read("danawa_product_next.html"), "3630770")
+        self.assertEqual(page.strategy, "jsonld-aggregate+next-sections")
+        self.assertEqual(page.name, "모나리자 점보롤 2겹 300m (16롤)")
+        self.assertEqual([o.mall for o in page.offers], ["11번가", "롯데ON", "옥션", "현대Hmall"])
+        self.assertEqual((page.offers[1].price, page.offers[1].shipping_fee, page.offers[1].shipping), (16870, 3000, "배송비 3,000원"))
+        self.assertEqual(page.lowest, 16860)
+
     def test_product_diff_item(self):
         page = danawa.parse_product(read("danawa_product_diff.html"), "20480041")
         self.assertEqual(page.strategy, "diff_item")
