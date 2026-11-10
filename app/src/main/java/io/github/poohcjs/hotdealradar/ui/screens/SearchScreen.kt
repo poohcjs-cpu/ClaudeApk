@@ -59,6 +59,8 @@ import io.github.poohcjs.hotdealradar.data.LinkReader
 import io.github.poohcjs.hotdealradar.data.LiveProduct
 import io.github.poohcjs.hotdealradar.data.LiveSource
 import io.github.poohcjs.hotdealradar.data.PriceHistory
+import io.github.poohcjs.hotdealradar.data.PriceWatch
+import io.github.poohcjs.hotdealradar.data.savingVsMarket
 import io.github.poohcjs.hotdealradar.data.LiveSort
 import io.github.poohcjs.hotdealradar.data.Settings
 import io.github.poohcjs.hotdealradar.data.ago
@@ -125,6 +127,8 @@ fun SearchScreen(
     onClearLink: () -> Unit = {},
     onRememberMall: () -> Unit = {},
     onWatch: (String) -> Unit = {},
+    watches: List<PriceWatch> = emptyList(),
+    onToggleWatch: (PriceWatch) -> Unit = {},
 ) {
     val p = HD.p
     var q by rememberSaveable { mutableStateOf(live.query) }
@@ -187,6 +191,8 @@ fun SearchScreen(
     val sort = sortName?.let { LiveSort.valueOf(it) } ?: defaultLiveSort(inCat)
     val sorted = sortLive(inCat, sort, ship)
     val cats = base.filter { it.category.isNotBlank() }.groupingBy { it.category }.eachCount().entries.sortedByDescending { it.value }
+    // 가장 싼 결과가 다나와·에누리 최저가(누구나 쉽게 찾는 값)보다 얼마나 싼지
+    val saving = remember(inCat, ship) { savingVsMarket(inCat, ship) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = contentPadding) {
         item { ScreenTitle("검색", "여러 쇼핑몰 가격을 지금 바로 비교해 가장 싼 곳을 찾아요") }
@@ -289,13 +295,18 @@ fun SearchScreen(
                 }
                 if (sorted.isNotEmpty()) {
                     val top = sorted.first()
-                    item { BestPick(top, sort, ship, index) { openProduct(top) } }
+                    item { BestPick(top, sort, ship, index, saving?.takeIf { sort == LiveSort.UNIT }) { openProduct(top) } }
                 }
-                // 지금 사도 될까? — 커뮤니티 핫딜 기록과 비교
+                // 지금 사도 될까? — 커뮤니티 핫딜 기록과 비교 + 지금 최저가보다 싸지면 알림
                 item {
-                    val best = remember(inCat, ship) { sortLive(inCat, LiveSort.UNIT, ship).firstOrNull() }
+                    val best = remember(inCat, ship) { sortLive(inCat.filter { !it.used }, LiveSort.UNIT, ship).firstOrNull() }
                     val hist = remember(live.history, inCat) { live.history?.let { ArchiveSearch.withPeers(it, inCat) } }
-                    PastDeals(hist, best?.let { shownUnit(it, LiveSort.UNIT, ship) }, best?.let { shownCost(it, LiveSort.UNIT, ship) }, submitted, submitted in s.keywords, onWatch, openUrl)
+                    val bu = best?.let { shownUnit(it, LiveSort.UNIT, ship) }
+                    val bc = best?.let { shownCost(it, LiveSort.UNIT, ship) }
+                    val watch = watches.firstOrNull { it.query == live.query }
+                    PastDeals(hist, bu, bc, live.query, watch, openUrl) {
+                        onToggleWatch(watch ?: PriceWatch(live.query, bu?.per, bu?.value, bc, best?.mall ?: best?.source?.label.orEmpty(), System.currentTimeMillis()))
+                    }
                 }
                 item {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(top = 18.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -417,7 +428,7 @@ private fun breakdown(prod: LiveProduct, sort: LiveSort, ship: Boolean): String?
 }
 
 @Composable
-private fun BestPick(prod: LiveProduct, sort: LiveSort, ship: Boolean, index: Index, onClick: () -> Unit) {
+private fun BestPick(prod: LiveProduct, sort: LiveSort, ship: Boolean, index: Index, saving: Pair<LiveProduct, Int>? = null, onClick: () -> Unit) {
     val p = HD.p
     val opt = pickOption(prod, sort, ship)
     val cost = shownCost(prod, sort, ship)
@@ -427,9 +438,22 @@ private fun BestPick(prod: LiveProduct, sort: LiveSort, ship: Boolean, index: In
         Modifier.fillMaxWidth().padding(horizontal = 20.dp).clip(RoundedCornerShape(24.dp)).background(p.hero).clickable(onClick = onClick).padding(20.dp),
     ) {
         Text(
-            (if (sort == LiveSort.UNIT) "🏆 단가가 가장 싼 상품" else "🏆 가장 싼 상품") + if (ship) " · 배송비 포함" else "",
+            when (prod.source) {
+                LiveSource.HOTDEAL -> "🔥 지금 진행 중인 핫딜이 가장 싸요"
+                LiveSource.MALL -> "🏆 공식몰이 가장 싸요"
+                else -> if (sort == LiveSort.UNIT) "🏆 단가가 가장 싼 상품" else "🏆 가장 싼 상품"
+            } + if (ship) " · 배송비 포함" else "",
             color = Color(0xFFFFB38F), fontSize = 13.sp, fontWeight = FontWeight.Bold,
         )
+        if (saving != null) {
+            val mu = shownUnit(saving.first, LiveSort.UNIT, ship)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "다나와·에누리 최저가(${saving.first.mall ?: saving.first.source.label}, ${mu?.let { "${won(it.value)}원/${it.per}" } ?: ""})보다 ${saving.second}% 싸요",
+                color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, lineHeight = 19.sp,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Good.copy(alpha = 0.85f)).padding(horizontal = 10.dp, vertical = 5.dp),
+            )
+        }
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             ProductImage(prod.image, "🛒", 84.dp, 16.dp)
@@ -485,7 +509,8 @@ private fun LiveRow(prod: LiveProduct, sort: LiveSort, ship: Boolean, index: Ind
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (prod.source == LiveSource.MALL) Tag("공식몰", Good, filled = true)
+                if (prod.source == LiveSource.HOTDEAL) Tag("🔥 핫딜", Brand, filled = true)
+                else if (prod.source == LiveSource.MALL) Tag("공식몰", Good, filled = true)
                 else if (prod.source == LiveSource.ENURI) Tag("에누리")
                 if (prod.isListing) Tag(prod.mall!!, Discover)
                 if (opt != null && opt.label.isNotBlank()) Tag(opt.label)
@@ -631,7 +656,7 @@ private fun LinkCard(link: LinkState, live: LiveSearchState, ship: Boolean, onCl
 @Composable
 private fun PastDeals(
     history: PriceHistory?, bestUnit: io.github.poohcjs.hotdealradar.data.UnitPrice?, bestCost: Long?,
-    query: String, watching: Boolean, onWatch: (String) -> Unit, open: (String) -> Unit,
+    query: String, watch: PriceWatch?, open: (String) -> Unit, onToggleWatch: () -> Unit,
 ) {
     val p = HD.p
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(top = 14.dp).cardBg(20.dp, 1.dp).padding(16.dp)) {
@@ -679,12 +704,24 @@ private fun PastDeals(
                 if (history.deals.size > 5) Text("외 ${history.deals.size - 5}건", fontSize = 11.5.sp, color = p.faint)
             }
         }
-        Spacer(Modifier.height(10.dp))
-        if (watching) Text("🔔 ‘$query’ 핫딜이 올라오면 알려 드려요", fontSize = 12.5.sp, color = Good, fontWeight = FontWeight.SemiBold)
-        else Text(
-            "🔔 ‘$query’ 핫딜 올라오면 알림 받기", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Brand,
-            modifier = Modifier.clip(RoundedCornerShape(10.dp)).border(1.dp, Brand.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
-                .clickable { onWatch(query) }.padding(horizontal = 12.dp, vertical = 8.dp),
-        )
+        Spacer(Modifier.height(12.dp))
+        val baseText = bestUnit?.let { "${won(it.value)}원/${it.per}" } ?: bestCost?.let { "${won(it)}원" }
+        if (watch != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "🔔 ${watch.unit?.let { "${won(it)}원/${watch.per}" } ?: watch.cost?.let { "${won(it)}원" } ?: "지금 최저가"}보다 싼 핫딜이 올라오거나 값이 내려가면 알려 드려요",
+                    fontSize = 12.5.sp, color = Good, fontWeight = FontWeight.SemiBold, lineHeight = 17.sp, modifier = Modifier.weight(1f),
+                )
+                Text("끄기", fontSize = 12.5.sp, color = p.sub, modifier = Modifier.clickable(onClick = onToggleWatch).padding(6.dp))
+            }
+        } else if (baseText != null) {
+            Text(
+                "🔔 지금 최저가($baseText)보다 싸지면 알림", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Brand,
+                modifier = Modifier.clip(RoundedCornerShape(10.dp)).border(1.dp, Brand.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                    .clickable(onClick = onToggleWatch).padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+            Spacer(Modifier.height(4.dp))
+            Text("커뮤니티 핫딜을 매시간, 다나와·에누리·공식몰을 6시간마다 다시 확인해요", fontSize = 11.5.sp, color = p.faint)
+        }
     }
 }

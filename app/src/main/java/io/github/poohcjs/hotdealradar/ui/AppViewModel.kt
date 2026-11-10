@@ -24,6 +24,7 @@ import io.github.poohcjs.hotdealradar.data.PriceHistory
 import io.github.poohcjs.hotdealradar.data.QueryCleaner
 import io.github.poohcjs.hotdealradar.data.UnitPrice
 import io.github.poohcjs.hotdealradar.data.linkQuery
+import io.github.poohcjs.hotdealradar.data.liveDeals
 import io.github.poohcjs.hotdealradar.data.mergeSources
 import io.github.poohcjs.hotdealradar.data.productWords
 import kotlinx.coroutines.async
@@ -138,8 +139,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             var en = emptyList<LiveProduct>()
             var ml = emptyList<LiveProduct>()
             var danawaError: Throwable? = null
+            // 지금 진행 중인 커뮤니티 핫딜 (수집기가 모은 최근 72시간 글) — 가격비교 최저가보다 싼 경우가 많다
+            val deals = _state.value.index?.posts?.let { liveDeals(it, q) }.orEmpty()
+            if (deals.isNotEmpty()) _liveSearch.update { it.copy(sites = it.sites + (LiveSource.HOTDEAL to SiteState(false, deals.size))) }
             fun publish(source: LiveSource? = null, site: SiteState? = null) {
-                val merged = mergeSources(dn, en, ml, listOfNotNull(linkProduct()))
+                val merged = mergeSources(dn, en, ml, listOfNotNull(linkProduct()) + deals)
                 rememberProducts(merged)
                 _liveSearch.update { st ->
                     val nextSites = if (source != null && site != null) st.sites + (source to site) else st.sites
@@ -263,6 +267,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         prefs.userMalls = listOf(Mall(info.host, info.site, "cafe24", words, user = true)) + prefs.userMalls.filter { it.host != info.host }
         _link.value = st.copy(remembered = true)
     }
+
+    val watches: StateFlow<List<io.github.poohcjs.hotdealradar.data.PriceWatch>> = prefs.watches
+
+    /** 가격 알림 걸기/풀기 (같은 검색어는 하나만) */
+    fun toggleWatch(w: io.github.poohcjs.hotdealradar.data.PriceWatch) {
+        prefs.updateWatches { list -> if (list.any { it.query == w.query }) list.filter { it.query != w.query } else listOf(w) + list }
+        // 처음 거는 알림이면 바로 다음 확인부터 동작하도록 주기 작업을 보장
+        DealCheckWorker.schedule(getApplication(), true)
+    }
+
+    fun removeWatch(query: String) = prefs.updateWatches { list -> list.filter { it.query != query } }
 
     /** 관심 키워드로 등록 → 이 말이 들어간 커뮤니티 핫딜이 올라오면 알림 */
     fun watchKeyword(word: String) {

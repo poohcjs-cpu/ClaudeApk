@@ -103,12 +103,15 @@ class MainActivity : ComponentActivity() {
     }
 
     /** 다른 앱에서 '공유 → 핫딜 레이더'로 보낸 글 */
+    /** 다른 앱에서 공유한 글, 또는 가격 알림을 눌러 다시 검색할 말 */
     private fun sharedText(intent: Intent?): String? =
         intent?.takeIf { it.action == Intent.ACTION_SEND && it.type?.startsWith("text/") == true }
             ?.let { it.getStringExtra(Intent.EXTRA_TEXT) ?: it.getStringExtra(Intent.EXTRA_SUBJECT) }
+            ?: intent?.getStringExtra(EXTRA_SEARCH)
 
     companion object {
         const val EXTRA_ITEM = "item"
+        const val EXTRA_SEARCH = "search"
     }
 }
 
@@ -126,6 +129,7 @@ fun App(
     val liveSearch by vm.liveSearch.collectAsStateWithLifecycle()
     val livePages by vm.livePages.collectAsStateWithLifecycle()
     val linkState by vm.link.collectAsStateWithLifecycle()
+    val watches by vm.watches.collectAsStateWithLifecycle()
     // 보던 화면 유지: 탭·열린 상세 화면을 화면 회전·앱 정리 뒤에도 되살리고(rememberSaveable),
     // 앱을 완전히 닫았어도 30분 안에 다시 열면 이어서 보여 준다(restoredNav)
     var tab by rememberSaveable { mutableStateOf(vm.restoredNav?.first?.let { n -> Tab.entries.firstOrNull { it.name == n } } ?: Tab.DEALS) }
@@ -203,7 +207,7 @@ fun App(
             return@Scaffold
         }
         if (tab == Tab.SETTINGS) {
-            screens.SaveableStateProvider("t:SETTINGS") { SettingsScreen(index, s, padding, vm::updateSettings, ::askNotify) }
+            screens.SaveableStateProvider("t:SETTINGS") { SettingsScreen(index, s, padding, vm::updateSettings, ::askNotify, watches, vm::removeWatch) }
             return@Scaffold
         }
         PullToRefreshBox(isRefreshing = state.loading && index != null, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -248,6 +252,7 @@ fun App(
                             onIncomingHandled = { pendingShare.value = null },
                             link = linkState, onOpenLink = vm::openLink, onClearLink = vm::clearLink,
                             onRememberMall = vm::rememberLinkMall, onWatch = vm::watchKeyword,
+                            watches = watches, onToggleWatch = vm::toggleWatch,
                         )
                         Tab.SAVED -> SavedScreen(index, s, favs, pad, { item ->
                             // 실시간 검색에서 찜한 제품처럼 모아 둔 데이터에 없으면 실시간 화면으로

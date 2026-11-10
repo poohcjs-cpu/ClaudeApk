@@ -179,6 +179,22 @@ class ScreenshotTest {
         )
     }
 
+    @Test @Config(qualifiers = "w400dp-h1500dp-xxhdpi")
+    fun searchHotdeal() = shot("6_search_hotdeal", withBar = Tab.SEARCH) {
+        val post = io.github.poohcjs.hotdealradar.data.Item(
+            key = "post:1", kind = io.github.poohcjs.hotdealradar.data.ItemKind.POST, name = "순천 건봉국밥 950g 6팩 (무료배송)",
+            title = "[건봉국밥] 순천 건봉국밥 950g 6팩 (49,900원/무료)", mall = "건봉국밥", price = 49900, shipping = "무료배송", url = "u", source = "ppomppu",
+        )
+        val deals = io.github.poohcjs.hotdealradar.data.liveDeals(listOf(post), "건봉국밥")
+        val results = gunbongResults(deals).filter { it.source != io.github.poohcjs.hotdealradar.data.LiveSource.MALL }
+        SearchScreen(
+            index, s, favs, emptyList(), {},
+            LiveSearchState("건봉국밥", false, results, null, System.currentTimeMillis(), sites = gunbongSites +
+                (io.github.poohcjs.hotdealradar.data.LiveSource.HOTDEAL to io.github.poohcjs.hotdealradar.ui.SiteState(false, 1)), history = gunbongHistory),
+            {}, {}, none, {}, {},
+        )
+    }
+
     @Test @Config(qualifiers = "w400dp-h1600dp-xxhdpi")
     fun searchSharedLink() = shot("6_search_link", withBar = Tab.SEARCH) {
         val url = "https://gunbong1987.com/product/x/20/category/26/display/1/"

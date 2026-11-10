@@ -62,6 +62,8 @@ fun SettingsScreen(
     contentPadding: PaddingValues,
     onChange: ((Settings) -> Settings) -> Unit,
     onAskNotificationPermission: () -> Unit,
+    watches: List<io.github.poohcjs.hotdealradar.data.PriceWatch> = emptyList(),
+    onRemoveWatch: (String) -> Unit = {},
 ) {
     val p = HD.p
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(contentPadding)) {
@@ -97,6 +99,27 @@ fun SettingsScreen(
                 }
                 Spacer(Modifier.height(8.dp))
                 ToggleRow("관심 제품군만 보기", "하나도 안 고르면 모든 제품군을 보여요", s.interestOnly) { v -> onChange { it.copy(interestOnly = v) } }
+            }
+        }
+
+        Group("가격 알림") {
+            Text(
+                if (watches.isEmpty()) "검색 결과의 ‘지금 최저가보다 싸지면 알림’을 누르면 여기에 모여요. 그보다 싼 핫딜이 올라오거나 다나와·에누리·공식몰 가격이 내려가면 알려 드려요."
+                else "이 값보다 싸지면 알려 드려요 (핫딜은 매시간, 쇼핑몰 가격은 6시간마다 확인)",
+                fontSize = 12.5.sp, lineHeight = 18.sp, color = p.sub,
+            )
+            watches.forEach { w ->
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(w.query, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = p.ink)
+                        Text(
+                            (w.unit?.let { "${io.github.poohcjs.hotdealradar.data.won(it)}원/${w.per}" } ?: w.cost?.let { "${io.github.poohcjs.hotdealradar.data.won(it)}원" } ?: "-") +
+                                (if (w.mall.isNotBlank()) " · 알림 걸 때 ${w.mall}" else ""),
+                            fontSize = 12.sp, color = p.sub,
+                        )
+                    }
+                    Text("끄기", fontSize = 13.sp, color = p.sub, modifier = Modifier.clickable { onRemoveWatch(w.query) }.padding(8.dp))
+                }
             }
         }
 

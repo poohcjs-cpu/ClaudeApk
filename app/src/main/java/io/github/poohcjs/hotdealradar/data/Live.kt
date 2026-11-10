@@ -179,7 +179,10 @@ class LiveBlocked(message: String) : IOException(message)
 enum class LiveSort(val label: String) { UNIT("단가 낮은 순"), PRICE("가격 낮은 순"), RANK("추천순") }
 
 /** 결과를 어디서 찾았는지 */
-enum class LiveSource(val label: String) { DANAWA("다나와"), ENURI("에누리"), MALL("공식몰") }
+enum class LiveSource(val label: String) { DANAWA("다나와"), ENURI("에누리"), MALL("공식몰"), HOTDEAL("핫딜") }
+
+/** 가격비교 사이트(다나와·에누리)에서 누구나 쉽게 찾는 값인지 — 이 앱이 그보다 얼마나 싸게 찾았는지 비교하는 기준 */
+val LiveSource.isMarket: Boolean get() = this == LiveSource.DANAWA || this == LiveSource.ENURI
 
 /** 정렬에 맞는 대표 옵션: 단가순이면 단가가 가장 낮은 묶음, 가격순이면 가장 싼 묶음 */
 fun pickOption(p: LiveProduct, sort: LiveSort, withShipping: Boolean = false): LiveOption? = when (sort) {

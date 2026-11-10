@@ -57,6 +57,28 @@ data class Fav(
         copy(lastPrice = price, lastMall = mall, checkedAt = at, lowestSeen = minOf(lowestSeen ?: price, price))
 }
 
+/**
+ * 가격 알림: 검색할 때 찾은 가장 싼 값(단가)을 기준으로, 그보다 싼 핫딜이 올라오거나 가격이 내려가면 알린다.
+ * '누구나 쉽게 찾는 최저가보다 싸게' 사려면 기다렸다가 사는 게 가장 확실해서.
+ */
+@Serializable
+data class PriceWatch(
+    val query: String,
+    /** 기준 단가 단위 ('10g', '100ml', '10m' …). 단가를 모르면 null → 가격으로 비교 */
+    val per: String? = null,
+    val unit: Long? = null,
+    /** 기준 가격 (배송비 포함) */
+    val cost: Long? = null,
+    /** 기준을 정할 때 가장 싼 곳 */
+    val mall: String = "",
+    val createdAt: Long = 0,
+    /** 앱이 가격비교 사이트를 다시 검색한 시각 (6시간마다) */
+    val checkedAt: Long = 0,
+    /** 마지막으로 알린 값 (같은 값으로 반복 알림 방지) */
+    val notifiedUnit: Long? = null,
+    val notifiedCost: Long? = null,
+)
+
 class Prefs(context: Context) {
     private val sp: SharedPreferences = context.getSharedPreferences("hotdeal", Context.MODE_PRIVATE)
     private val favSerializer = MapSerializer(String.serializer(), Fav.serializer())
@@ -124,6 +146,18 @@ class Prefs(context: Context) {
         return parts.firstOrNull()?.let { it to parts.drop(1) }
     }
 
+    private val _watches = MutableStateFlow(readWatches())
+    val watches: StateFlow<List<PriceWatch>> = _watches.asStateFlow()
+
+    private fun readWatches(): List<PriceWatch> =
+        sp.getString(K_WATCHES, null)?.let { runCatching { JSON.decodeFromString(ListSerializer(PriceWatch.serializer()), it) }.getOrNull() } ?: emptyList()
+
+    fun updateWatches(change: (List<PriceWatch>) -> List<PriceWatch>) {
+        val next = change(_watches.value).take(MAX_WATCHES)
+        _watches.value = next
+        sp.edit { putString(K_WATCHES, JSON.encodeToString(ListSerializer(PriceWatch.serializer()), next)) }
+    }
+
     /** 사용자가 공유로 알려 준 공식몰·자사몰 (검색할 때 함께 찾아본다) */
     var userMalls: List<Mall>
         get() = sp.getString(K_MALLS, null)?.let { runCatching { JSON.decodeFromString(ListSerializer(Mall.serializer()), it) }.getOrNull() } ?: emptyList()
@@ -144,5 +178,7 @@ class Prefs(context: Context) {
         private const val K_NAV = "nav"
         private const val K_NAV_AT = "navAt"
         private const val K_MALLS = "userMalls"
+        private const val K_WATCHES = "watches"
+        const val MAX_WATCHES = 10
     }
 }

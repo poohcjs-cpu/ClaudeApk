@@ -210,4 +210,50 @@ class MultiSourceTest {
         // 단위가 다르면 판단하지 않는다
         assertNull(ArchiveSearch.verdict(h, UnitPrice("87원/10m", 87, "10m"), 7790))
     }
+
+    // ── 진행 중인 핫딜 · 가격비교 최저가 대비 · 가격 알림 ──
+    private fun post(key: String, title: String, price: Long, shipping: String = "무료배송", ended: Boolean = false, mall: String = "11번가") =
+        io.github.poohcjs.hotdealradar.data.Item(
+            key = key, kind = io.github.poohcjs.hotdealradar.data.ItemKind.POST, name = title, title = "[$mall] $title", mall = mall,
+            price = price, shipping = shipping, url = "https://www.ppomppu.co.kr/zboard/view.php?id=ppomppu&no=1", source = "ppomppu", ended = ended,
+        )
+
+    @Test fun liveDealsBeatMarketLowest() {
+        val posts = listOf(
+            post("post:1", "건봉 돼지국밥 950g 6팩", 49900, "무료배송"),
+            post("post:2", "건봉국밥 950g 3팩", 30000, ended = true),
+            post("post:3", "다른 국밥 950g", 9000),
+            post("post:4", "건봉국밥 950g x2 (\$19.99)", 2000),
+        )
+        val deals = io.github.poohcjs.hotdealradar.data.liveDeals(posts, "건봉국밥")
+        assertEquals(listOf("deal:post:1"), deals.map { it.pcode })
+        val d = deals.single()
+        assertEquals(LiveSource.HOTDEAL, d.source)
+        assertEquals(0L, d.shippingFee)
+        assertTrue(d.mall!!.contains("뽐뿌 핫딜"))
+        val market = listOf(
+            listing("38년 건봉 1987 돼지국밥 950g 3개", 43350, "11번가"),
+            listing("1987 건봉 돼지국밥 1인분 950g", 17960, "11번가", 3000),
+        )
+        val merged = mergeSources(market, emptyList(), emptyList(), deals)
+        val saving = io.github.poohcjs.hotdealradar.data.savingVsMarket(merged, true)!!
+        assertEquals(43350L, saving.first.price) // 다나와 최저 단가 152원/10g
+        assertEquals(42, saving.second) // 49,900/5,700g = 88원/10g → 42% 쌈
+        // 가격비교 최저가가 가장 싸면 null
+        assertNull(io.github.poohcjs.hotdealradar.data.savingVsMarket(market, true))
+    }
+
+    @Test fun priceWatchSaving() {
+        val w = io.github.poohcjs.hotdealradar.data.PriceWatch("건봉국밥", "10g", 102, 48500)
+        val cheaper = listing("건봉 돼지국밥 950g 6팩", 49900, "11번가")
+        val s = io.github.poohcjs.hotdealradar.work.DealCheckWorker.watchSaving(w, cheaper)!!
+        assertEquals(13, s.first) // 88원 vs 102원
+        assertTrue(s.second.contains("알림 걸 때 102원/10g"))
+        assertNull(io.github.poohcjs.hotdealradar.work.DealCheckWorker.watchSaving(w, listing("건봉 국밥 950g", 10000, "A")))
+        // 단위가 다르면 알리지 않는다
+        assertNull(io.github.poohcjs.hotdealradar.work.DealCheckWorker.watchSaving(w, listing("건봉 국물 1L", 1000, "A")))
+        // 기준에 단가가 없으면 가격으로
+        val byCost = io.github.poohcjs.hotdealradar.data.PriceWatch("게임패드", cost = 50000)
+        assertEquals(20, io.github.poohcjs.hotdealradar.work.DealCheckWorker.watchSaving(byCost, listing("게임패드 X", 40000, "A"))!!.first)
+    }
 }

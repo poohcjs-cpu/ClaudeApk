@@ -71,12 +71,19 @@ data class BuyVerdict(val good: Boolean, val title: String, val detail: String)
 object ArchiveSearch {
     /** 검색어 낱말이 모두 들어 있는 글 (띄어쓰기는 무시) */
     fun match(items: List<ArchiveItem>, query: String): List<ArchiveItem> {
-        val words = QueryCleaner.clean(query).lowercase().split(' ').map { it.trim() }.filter { it.length >= 2 || it.any { c -> c.isDigit() } }
+        val words = queryWords(query)
         if (words.isEmpty()) return emptyList()
-        return items.filter { it.p > 0 }.filter { it2 ->
-            val hay = (it2.n + " " + it2.m).replace(" ", "").lowercase()
-            words.all { w -> w in hay || splitMatch(w, hay) }
-        }
+        return items.filter { it.p > 0 && matchesWords(words, it.n + " " + it.m) }
+    }
+
+    fun queryWords(query: String): List<String> =
+        QueryCleaner.clean(query).lowercase().split(' ').map { it.trim() }.filter { it.length >= 2 || it.any { c -> c.isDigit() } }
+
+    /** 낱말이 모두 글에 들어 있는지 ('건봉국밥'은 '건봉 돼지국밥'에도 맞음) */
+    fun matchesWords(words: List<String>, text: String): Boolean {
+        if (words.isEmpty()) return false
+        val hay = text.replace(" ", "").lowercase()
+        return words.all { w -> w in hay || splitMatch(w, hay) }
     }
 
     /** '건봉국밥'이 '건봉 돼지국밥'에도 맞도록: 붙여 쓴 말을 두 토막(각 2글자 이상)으로 나눠 둘 다 들어 있으면 같은 상품으로 */
@@ -123,6 +130,10 @@ object ArchiveSearch {
         val when_ = "${past.item.date} ${past.item.sourceName}"
         val diff = (now - then) * 100.0 / then
         return when {
+            diff <= -3 -> BuyVerdict(
+                true, "지난 핫딜보다도 ${(-diff).toInt()}% 싸요 — 사기 좋은 때예요",
+                "지난 핫딜 최저 ${won(then)}원/$per ($when_) · 지금 ${won(now)}원/$per",
+            )
             diff <= 3 -> BuyVerdict(
                 true, "지금 가격이 지난 핫딜가 수준이에요",
                 "지난 핫딜 최저 ${won(then)}원/$per ($when_) · 지금 ${won(now)}원/$per" + (bestNowCost?.let { "" } ?: ""),
@@ -137,6 +148,45 @@ object ArchiveSearch {
             )
         }
     }
+}
+
+/**
+ * 지금 진행 중인 커뮤니티 핫딜(최근 72시간, 끝나지 않음) 가운데 검색어와 맞는 것 → 살 수 있는 검색 결과로.
+ * 핫딜은 보통 가격비교 최저가보다 싸서, 있으면 맨 위로 올라온다.
+ */
+fun liveDeals(posts: List<Item>, query: String): List<LiveProduct> {
+    val words = ArchiveSearch.queryWords(query)
+    if (words.isEmpty()) return emptyList()
+    val foreign = Regex("""[$€¥£]|USD|달러""")
+    return posts.asSequence()
+        .filter { !it.ended && (it.price ?: 0) >= 100 && it.source != "ppomppu_overseas" && !foreign.containsMatchIn(it.title) }
+        .filter { ArchiveSearch.matchesWords(words, it.title + " " + it.mall) }
+        .map { p ->
+            val price = p.price!!
+            val fee = p.dealTotal?.takeIf { it >= price }?.let { it - price } ?: EnuriParser.feeOf(p.shipping)
+            val name = p.name.ifBlank { p.title }
+            LiveProduct(
+                pcode = "deal:" + p.key, name = name, image = p.image, price = price, malls = null,
+                unit = UnitPrice.estimate(name, price), options = emptyList(), used = false, overseas = false, rank = 0,
+                mall = (p.mall.ifBlank { "쇼핑몰" }) + " · " + (ArchiveItem.SOURCE_NAMES[p.source] ?: p.source) + " 핫딜",
+                link = p.url, shippingFee = fee, total = fee?.let { price + it }, category = "", source = LiveSource.HOTDEAL,
+            )
+        }.toList()
+}
+
+/**
+ * 가장 싼 결과가 다나와·에누리 최저(누구나 쉽게 찾는 값)보다 얼마나 싼지(%). 같은 단위로 비교할 수 있을 때만.
+ * 양수면 이 앱이 더 싸게 찾은 것.
+ */
+fun savingVsMarket(list: List<LiveProduct>, withShipping: Boolean): Pair<LiveProduct, Int>? {
+    val sorted = sortLive(list.filter { !it.used }, LiveSort.UNIT, withShipping)
+    val top = sorted.firstOrNull() ?: return null
+    if (top.source.isMarket) return null
+    val tu = shownUnit(top, LiveSort.UNIT, withShipping) ?: return null
+    val market = sorted.firstOrNull { it.source.isMarket && shownUnit(it, LiveSort.UNIT, withShipping)?.per == tu.per } ?: return null
+    val mu = shownUnit(market, LiveSort.UNIT, withShipping)!!
+    if (mu.value <= tu.value) return null
+    return market to ((mu.value - tu.value) * 100 / mu.value).toInt()
 }
 
 /** 달별 기록 파일 받기. 지난달 이전 파일은 하루, 이번 달은 30분 동안 다시 받지 않는다 */
