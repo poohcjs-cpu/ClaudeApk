@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">핫딜 레이더</string>
+    <string name="channel_deals">새 핫딜</string>
+    <string name="channel_deals_desc">내 기준 이상 싼 새 핫딜과 찜한 제품의 목표가 도달을 알려요</string>
+</resources>
