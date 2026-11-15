@@ -203,9 +203,65 @@ data class LinkInfo(
     val ship: ShipRule?,
     val image: String,
     val platform: String?,
+    /** 품번·모델 번호 (예: M1JP7101). 있으면 이걸로 다른 곳을 정확히 찾는다 */
+    val code: String? = null,
+    val brand: String = "",
 ) {
     val fee: Long? get() = price?.let { ship?.feeFor(it) }
     val total: Long? get() = price?.let { it + (fee ?: 0) }
+    /** 다른 곳을 찾을 검색어: 품번이 있으면 품번, 없으면 이름에서 고른 낱말 */
+    val query: String get() = code ?: linkQuery(name)
+}
+
+/**
+ * 품번·모델 번호. 패션·가전은 같은 상품이라도 이름이 쇼핑몰마다 달라서, 품번으로 찾아야 정확하다.
+ * 영문과 숫자가 섞인 6~16자 (예: M1JP7101, SM-S931N, MKFW4KH). 용량·규격(950g, 2L, 300m, 16GB)은 아님.
+ */
+object ProductCode {
+    private val TOKEN = Regex("""(?<![A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9-]{5,15}(?![A-Za-z0-9])""")
+    private val SPEC = Regex("""(?i)\d+(?:\.\d+)?(?:ml|kg|g|l|m|cm|mm|ea|gb|tb|mah|w|hz|inch|p|t|매|롤)""")
+
+    fun isCode(s: String): Boolean {
+        if (s.length !in 6..16) return false
+        val digits = s.count { it.isDigit() }
+        val letters = s.count { it in 'A'..'Z' || it in 'a'..'z' }
+        val upper = s.count { it in 'A'..'Z' }
+        // 숫자가 하나뿐이면 대문자가 많은 모델명만 (예: MKFW4KH)
+        if (letters < 1 || digits < 1 || (digits < 2 && upper < 4)) return false
+        if (SPEC.matches(s)) return false
+        // 모두 소문자인 낱말+숫자(iphone15)는 상품 이름에 가깝다
+        if (s.none { it in 'A'..'Z' } && digits < 4) return false
+        return true
+    }
+
+    fun find(text: String?): String? = text?.let { t -> TOKEN.findAll(t).map { it.value.trim('-') }.firstOrNull { isCode(it) } }
+
+    /** 검색어 자체가 품번 하나인지 */
+    fun isQueryCode(q: String): Boolean = q.trim().let { !it.contains(' ') && isCode(it) }
+}
+
+/** 품번으로 바로 열어 볼 패션·브랜드몰 (앱이 대신 읽지 못하는 곳: 사용자가 직접 확인) */
+object FashionMalls {
+    /** 티비에이치글로벌 브랜드 → TBH SHOP (공식몰, 이월 상품 할인이 있음) */
+    private val TBH = listOf("마인드브릿지", "mindbridge", "베이직하우스", "basichouse", "쥬시쥬디", "jucyjudy", "아쿠아스큐텀", "aquascutum", "tbh")
+    private val CATS = listOf(
+        "의류", "패션", "자켓", "재킷", "점퍼", "코트", "니트", "티셔츠", "셔츠", "블라우스", "원피스", "스커트", "바지", "팬츠", "청바지", "데님",
+        "가디건", "후드", "맨투맨", "패딩", "베스트", "슬랙스", "레깅스", "운동화", "스니커즈", "구두", "샌들", "부츠", "슬리퍼", "가방", "백팩", "지갑", "모자",
+    )
+
+    fun isFashion(texts: List<String>): Boolean = texts.any { t -> CATS.any { it in t } }
+
+    fun isTbhBrand(text: String): Boolean = text.lowercase().replace(" ", "").let { t -> TBH.any { it in t } }
+
+    /** (이름, 주소). 주소 형식은 각 쇼핑몰에서 확인한 것만 */
+    fun links(query: String, tbh: Boolean): List<Pair<String, String>> {
+        val q = java.net.URLEncoder.encode(query.trim(), "UTF-8")
+        return buildList {
+            if (tbh) add("TBH SHOP (공식몰)" to "https://tbhshop.co.kr/goods/search?keyword=$q")
+            add("29CM" to "https://www.29cm.co.kr/store/search?keyword=$q")
+            add("SSG닷컴" to "https://www.ssg.com/search.ssg?target=all&query=$q")
+        }
+    }
 }
 
 object LinkReader {
@@ -233,6 +289,8 @@ object LinkReader {
         val site = meta(doc, "og:site_name")?.trim().orEmpty().ifBlank { host }
         var name = ""
         var price: Long? = null
+        var code: String? = null
+        var brand = ""
         var image = meta(doc, "og:image").orEmpty()
         for (s in doc.select("script[type=application/ld+json]")) {
             val el = runCatching { JSON.parseToJsonElement(s.data()) }.getOrNull() ?: continue
@@ -243,6 +301,12 @@ object LinkReader {
             }
             val prod = items.mapNotNull { it as? JsonObject }.firstOrNull { (it["@type"] as? JsonPrimitive)?.contentOrNull == "Product" } ?: continue
             name = (prod["name"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+            code = listOf("sku", "mpn", "model", "productID").firstNotNullOfOrNull { k -> (prod[k] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { ProductCode.isCode(it) } }
+            brand = when (val b = prod["brand"]) {
+                is JsonObject -> (b["name"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                is JsonPrimitive -> b.contentOrNull.orEmpty()
+                else -> ""
+            }
             val offers = prod["offers"]
             val o = (offers as? JsonObject) ?: (offers as? JsonArray)?.firstOrNull() as? JsonObject
             price = o?.let { num(it, "price") ?: num(it, "lowPrice") }
@@ -259,7 +323,10 @@ object LinkReader {
         if (name.isBlank()) name = meta(doc, "og:title") ?: doc.title()
         name = cleanTitle(name, site)
         if (image.startsWith("//")) image = "https:$image"
-        return LinkInfo(url, host, site, name, price, ShipRule.parse(doc.text()), image, platformOf(url))
+        if (code == null) code = ProductCode.find(name) ?: ProductCode.find(meta(doc, "og:title"))
+        // 이름에 브랜드가 없으면 붙여 둔다 (검색·알림 이름을 알아보기 쉽게)
+        if (brand.isNotBlank() && !name.contains(brand)) name = "$brand $name"
+        return LinkInfo(url, host, site, name, price, ShipRule.parse(doc.text()), image, platformOf(url), code, brand)
     }
 
     /** 'XX - 쇼핑몰이름', '[공식몰] XX' 같은 꾸밈을 뺀 상품 이름 */

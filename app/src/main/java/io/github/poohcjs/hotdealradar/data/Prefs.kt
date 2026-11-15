@@ -77,7 +77,17 @@ data class PriceWatch(
     /** 마지막으로 알린 값 (같은 값으로 반복 알림 방지) */
     val notifiedUnit: Long? = null,
     val notifiedCost: Long? = null,
-)
+    /** 관심 상품 링크 (브랜드 공식몰 등): 그 페이지 가격도 6시간마다 다시 읽는다 */
+    val url: String? = null,
+    /** 화면에 보여 줄 이름 (링크 상품 이름) */
+    val title: String = "",
+) {
+    /** 같은 알림인지 가르는 값 */
+    val key: String get() = url ?: query
+    val label: String get() = title.ifBlank { query }
+    /** 가격비교 사이트를 다시 검색해도 같은 상품을 찾을 수 있는지 (품번이 있거나 검색어로 건 알림) */
+    val searchable: Boolean get() = url == null || ProductCode.isQueryCode(query)
+}
 
 class Prefs(context: Context) {
     private val sp: SharedPreferences = context.getSharedPreferences("hotdeal", Context.MODE_PRIVATE)

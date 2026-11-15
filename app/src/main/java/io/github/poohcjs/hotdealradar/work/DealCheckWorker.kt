@@ -123,19 +123,33 @@ class DealCheckWorker(context: Context, params: WorkerParameters) : CoroutineWor
                 if (id in already || id in sent) continue
                 val saving = watchSaving(w, d) ?: continue
                 sent += id
-                notifyWatch(w, "‘${w.query}’ 핫딜이 지금 최저가보다 ${saving.first}% 싸요", "${d.name}\n${d.mall} · ${saving.second}", w.query, id)
+                notifyWatch(w, "‘${w.label}’ 핫딜이 지금 최저가보다 ${saving.first}% 싸요", "${d.name}\n${d.mall} · ${saving.second}", w.query, id)
             }
         }
         if (sent.isNotEmpty()) prefs.notifiedIds = already + sent
 
-        // 가격비교 사이트·공식몰 다시 검색
+        // 가격비교 사이트·공식몰 다시 검색 (+ 관심 상품 링크는 그 페이지 가격도)
         val due = prefs.watches.value.filter { now - it.checkedAt > 6 * 3_600_000L }.sortedBy { it.checkedAt }.take(3)
         if (due.isEmpty()) return
         val client = LiveSearchClient()
+        for (w in due.filter { it.url != null }) {
+            val info = runCatching { client.readLink(w.url!!) }.getOrNull() ?: continue
+            val total = info.total ?: continue
+            val base = w.notifiedCost ?: w.cost ?: continue
+            if (total * 100 < base * 97) {
+                val pctv = ((((w.cost ?: base) - total) * 100) / (w.cost ?: base)).toInt()
+                notifyLink(w, "관심 상품 가격이 내려갔어요 (${pctv}%↓)", "${w.label}\n${info.site} ${won(total)}원 (알림 걸 때 ${won(w.cost)}원)")
+                prefs.updateWatches { list -> list.map { if (it.key == w.key) it.copy(notifiedCost = total) else it } }
+            }
+        }
         val malls = MallDirectory.merge(prefs.userMalls, runCatching {
             ArchiveClient(applicationContext) { Repository(applicationContext, prefs).dataUrl().substringBeforeLast('/') }.malls()
         }.getOrDefault(emptyList()))
         for (w in due) {
+            if (!w.searchable) {
+                prefs.updateWatches { list -> list.map { if (it.key == w.key) it.copy(checkedAt = now) else it } }
+                continue
+            }
             val dn = runCatching { client.search(w.query) }.getOrDefault(emptyList())
             val en = runCatching { client.enuriSearch(w.query) }.getOrDefault(emptyList())
             val ml = MallDirectory.match(w.query, malls).flatMap { (m, _) -> runCatching { client.mallSearch(m, w.query) }.getOrDefault(emptyList()) }
@@ -148,12 +162,30 @@ class DealCheckWorker(context: Context, params: WorkerParameters) : CoroutineWor
                 val bc = shownCost(best, LiveSort.UNIT, true)
                 val newLow = if (w.per != null) bu != null && bu < (w.notifiedUnit ?: Long.MAX_VALUE) * 97 / 100 else bc < (w.notifiedCost ?: Long.MAX_VALUE) * 97 / 100
                 if (saving != null && saving.first >= 5 && newLow) {
-                    notifyWatch(w, "‘${w.query}’ 가격이 내려갔어요 (${saving.first}%↓)", "${best.name}\n${best.mall ?: best.source.label} · ${saving.second}", w.query, "w:${w.query}:price")
+                    notifyWatch(w, "‘${w.label}’ 가격이 내려갔어요 (${saving.first}%↓)", "${best.name}\n${best.mall ?: best.source.label} · ${saving.second}", w.query, "w:${w.query}:price")
                     next = next.copy(notifiedUnit = bu, notifiedCost = bc)
                 }
             }
-            prefs.updateWatches { list -> list.map { if (it.query == w.query) next else it } }
+            prefs.updateWatches { list -> list.map { if (it.key == w.key) next.copy(notifiedCost = it.notifiedCost ?: next.notifiedCost) else it } }
         }
+    }
+
+    /** 관심 상품 링크 알림: 누르면 그 상품 페이지를 연다 */
+    private fun notifyLink(w: PriceWatch, title: String, text: String) {
+        if (!canNotify(applicationContext)) return
+        val pi = PendingIntent.getActivity(
+            applicationContext, w.key.hashCode(), Intent(Intent.ACTION_VIEW, android.net.Uri.parse(w.url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val n = NotificationCompat.Builder(applicationContext, CHANNEL_DEALS)
+            .setSmallIcon(R.drawable.ic_fire)
+            .setContentTitle(title)
+            .setContentText(text.substringAfter('\n'))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(pi)
+            .setAutoCancel(true)
+            .build()
+        runCatching { NotificationManagerCompat.from(applicationContext).notify(("link:" + w.key).hashCode(), n) }
     }
 
     private fun notifyWatch(w: PriceWatch, title: String, text: String, query: String, id: String) {

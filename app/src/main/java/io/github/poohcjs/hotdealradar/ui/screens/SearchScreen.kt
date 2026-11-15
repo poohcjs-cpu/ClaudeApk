@@ -60,6 +60,8 @@ import io.github.poohcjs.hotdealradar.data.LiveProduct
 import io.github.poohcjs.hotdealradar.data.LiveSource
 import io.github.poohcjs.hotdealradar.data.PriceHistory
 import io.github.poohcjs.hotdealradar.data.PriceWatch
+import io.github.poohcjs.hotdealradar.data.ProductCode
+import io.github.poohcjs.hotdealradar.data.FashionMalls
 import io.github.poohcjs.hotdealradar.data.savingVsMarket
 import io.github.poohcjs.hotdealradar.data.LiveSort
 import io.github.poohcjs.hotdealradar.data.Settings
@@ -191,8 +193,17 @@ fun SearchScreen(
     val sort = sortName?.let { LiveSort.valueOf(it) } ?: defaultLiveSort(inCat)
     val sorted = sortLive(inCat, sort, ship)
     val cats = base.filter { it.category.isNotBlank() }.groupingBy { it.category }.eachCount().entries.sortedByDescending { it.value }
+    // 패션 상품이면(품번 검색·의류 분류·패션 링크) 패션·브랜드몰 바로 열기 버튼을 보여 준다
+    val fashion = remember(live.results, live.query, link) {
+        ProductCode.isQueryCode(live.query) || link?.info?.code != null ||
+            FashionMalls.isFashion(live.results.map { it.category } + live.results.take(5).map { it.name } + listOfNotNull(link?.info?.name))
+    }
+    val tbh = remember(live.results, link) {
+        (live.results.take(10).map { it.name } + listOfNotNull(link?.info?.brand, link?.info?.name, link?.info?.host)).any { FashionMalls.isTbhBrand(it) }
+    }
     // 가장 싼 결과가 다나와·에누리 최저가(누구나 쉽게 찾는 값)보다 얼마나 싼지
-    val saving = remember(inCat, ship) { savingVsMarket(inCat, ship) }
+    val code = live.query.takeIf { ProductCode.isQueryCode(it) }
+    val saving = remember(inCat, ship, code) { savingVsMarket(inCat, ship, code) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = contentPadding) {
         item { ScreenTitle("검색", "여러 쇼핑몰 가격을 지금 바로 비교해 가장 싼 곳을 찾아요") }
@@ -222,7 +233,10 @@ fun SearchScreen(
             }
         }
 
-        if (link != null) item { LinkCard(link, live, ship, onClearLink, onRememberMall) }
+        if (link != null) item {
+            val lw = link.info?.let { i -> watches.firstOrNull { it.url == i.url } }
+            LinkCard(link, live, ship, onClearLink, onRememberMall, lw) { w -> onToggleWatch(w) }
+        }
 
         if (submitted.isEmpty()) {
             if (link != null) { item { Spacer(Modifier.height(28.dp)) }; return@LazyColumn }
@@ -274,11 +288,11 @@ fun SearchScreen(
             }
             live.error != null -> {
                 item { EmptyNote("지금은 실시간 가격을 못 불러왔어요", live.error, "📡") }
-                item { OtherSites(submitted, openUrl) }
+                item { OtherSites(submitted, openUrl, fashion, tbh) }
             }
             base.isEmpty() -> {
                 item { EmptyNote("검색 결과가 없어요", "다른 이름으로 찾아보거나 네이버쇼핑·다나와에서 직접 볼 수 있어요.", "🔎") }
-                item { OtherSites(submitted, openUrl) }
+                item { OtherSites(submitted, openUrl, fashion, tbh) }
             }
             else -> {
                 fun openProduct(prod: LiveProduct) {
@@ -295,7 +309,7 @@ fun SearchScreen(
                 }
                 if (sorted.isNotEmpty()) {
                     val top = sorted.first()
-                    item { BestPick(top, sort, ship, index, saving?.takeIf { sort == LiveSort.UNIT }) { openProduct(top) } }
+                    item { BestPick(top, sort, ship, index, saving?.takeIf { sort == LiveSort.UNIT || code != null }) { openProduct(top) } }
                 }
                 // 지금 사도 될까? — 커뮤니티 핫딜 기록과 비교 + 지금 최저가보다 싸지면 알림
                 item {
@@ -335,7 +349,7 @@ fun SearchScreen(
                         }
                     }
                 }
-                item { OtherSites(submitted, openUrl) }
+                item { OtherSites(submitted, openUrl, fashion, tbh) }
             }
         }
         item { Spacer(Modifier.height(28.dp)) }
@@ -373,9 +387,28 @@ private fun ChipLine(words: List<String>, onClick: (String) -> Unit) {
 
 /** 더 찾아보고 싶을 때: 같은 검색어로 네이버쇼핑·공식몰 검색·다나와·에누리를 바로 연다 (앱이 대신 읽지 않고 사용자가 직접 봄) */
 @Composable
-private fun OtherSites(q: String, open: (String) -> Unit) {
+private fun OtherSites(q: String, open: (String) -> Unit, fashion: Boolean = false, tbh: Boolean = false) {
     val p = HD.p
     Column(Modifier.fillMaxWidth().padding(20.dp)) {
+        if (fashion) {
+            Text("패션·브랜드몰에서 바로 찾기", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = p.ink)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                "옷·신발은 브랜드 공식몰 이월 할인이나 29CM 같은 편집숍이 가장 쌀 때가 많아요. 앱이 대신 읽을 수 없는 곳이라 품번으로 바로 열어 드려요. 더 싼 곳을 찾으면 그 상품 링크를 앱으로 공유해 가격 알림을 걸어 두세요.",
+                fontSize = 12.5.sp, color = p.sub, lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(FashionMalls.links(q, tbh)) { (label, url) ->
+                    Text(
+                        "$label ↗", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = p.ink,
+                        modifier = Modifier.clip(RoundedCornerShape(12.dp)).border(1.dp, p.line, RoundedCornerShape(12.dp))
+                            .background(p.card).clickable { open(url) }.padding(horizontal = 14.dp, vertical = 12.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(18.dp))
+        }
         Text("다른 곳에서도 찾아보기", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = p.ink)
         Spacer(Modifier.height(3.dp))
         Text("쿠팡·네이버 전용 상품은 앱이 읽을 수 없어요. 공식몰을 찾으면 링크를 앱으로 공유해 주세요 — 다음부터 함께 비교해요", fontSize = 12.5.sp, color = p.sub, lineHeight = 17.sp)
@@ -449,7 +482,7 @@ private fun BestPick(prod: LiveProduct, sort: LiveSort, ship: Boolean, index: In
             val mu = shownUnit(saving.first, LiveSort.UNIT, ship)
             Spacer(Modifier.height(6.dp))
             Text(
-                "다나와·에누리 최저가(${saving.first.mall ?: saving.first.source.label}, ${mu?.let { "${won(it.value)}원/${it.per}" } ?: ""})보다 ${saving.second}% 싸요",
+                "다나와·에누리 최저가(${saving.first.mall ?: saving.first.source.label}, ${mu?.let { "${won(it.value)}원/${it.per}" } ?: "${won(shownCost(saving.first, LiveSort.PRICE, ship))}원"})보다 ${saving.second}% 싸요",
                 color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, lineHeight = 19.sp,
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Good.copy(alpha = 0.85f)).padding(horizontal = 10.dp, vertical = 5.dp),
             )
@@ -575,7 +608,10 @@ private fun SourcesLine(live: LiveSearchState) {
 
 /** 공유받은 링크: 그 가격이 정말 싼지 앱이 찾은 다른 곳과 비교 */
 @Composable
-private fun LinkCard(link: LinkState, live: LiveSearchState, ship: Boolean, onClose: () -> Unit, onRemember: () -> Unit) {
+private fun LinkCard(
+    link: LinkState, live: LiveSearchState, ship: Boolean, onClose: () -> Unit, onRemember: () -> Unit,
+    watch: PriceWatch?, onToggleWatch: (PriceWatch) -> Unit,
+) {
     val p = HD.p
     val context = LocalContext.current
     Column(
@@ -604,7 +640,7 @@ private fun LinkCard(link: LinkState, live: LiveSearchState, ship: Boolean, onCl
                     ProductImage(info.image, "🔗", 64.dp, 12.dp)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(info.site, fontSize = 12.sp, color = p.sub, maxLines = 1)
+                        Text(info.site + (info.code?.let { " · 품번 $it" } ?: ""), fontSize = 12.sp, color = p.sub, maxLines = 1)
                         Text(info.name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = p.ink, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 19.sp)
                         if (info.price != null) {
                             Text(
@@ -634,9 +670,43 @@ private fun LinkCard(link: LinkState, live: LiveSearchState, ship: Boolean, onCl
                             fontSize = 12.sp, color = p.sub, lineHeight = 17.sp,
                         )
                         mine.unitNote?.let { Text("ⓘ $it", fontSize = 11.sp, color = p.faint, lineHeight = 15.sp) }
+                    } else if (info.code != null && others.any { it.name.contains(info.code, ignoreCase = true) }) {
+                        // 품번이 같은 상품끼리는 가격(배송비 포함)으로 바로 비교
+                        val same = others.filter { it.name.contains(info.code, ignoreCase = true) }.minByOrNull { shownCost(it, LiveSort.PRICE, ship) }!!
+                        val mc = shownCost(mine, LiveSort.PRICE, ship)
+                        val bc = shownCost(same, LiveSort.PRICE, ship)
+                        val (title, color) = when {
+                            bc > mc * 1.03 -> "이 링크가 다나와·에누리 최저가보다 ${((bc - mc) * 100 / bc)}% 싸요 👍" to Good
+                            mc > bc * 1.03 -> "다른 곳이 ${((mc - bc) * 100 / mc)}% 더 싸요 — ${same.mall ?: same.source.label}" to Brand
+                            else -> "다른 곳과 거의 같은 가격이에요" to p.ink
+                        }
+                        Text(title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = color)
+                        Text("같은 품번 ${info.code} · 이 링크 ${won(mc)}원 vs 가장 싼 다른 곳 ${won(bc)}원", fontSize = 12.sp, color = p.sub, lineHeight = 17.sp)
                     } else {
                         Text("양(용량·개수)을 맞춰 비교하기 어려워요. 아래 목록에서 직접 비교해 보세요.", fontSize = 12.5.sp, color = p.sub, lineHeight = 17.sp)
                     }
+                }
+                if (mine != null && others.isEmpty() && !live.loading) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "다나와·에누리에서는 " + (if (info.code != null) "품번 ${info.code}" else "같은 상품") + "을 찾지 못했어요. 아래 버튼으로 다른 쇼핑몰도 바로 확인해 보세요.",
+                        fontSize = 12.5.sp, color = p.sub, lineHeight = 17.sp,
+                    )
+                }
+                // 관심 상품: 이 페이지 가격과 (품번이 있으면) 다른 곳 가격을 계속 지켜보다가 싸지면 알림
+                if (info.total != null) {
+                    Spacer(Modifier.height(10.dp))
+                    if (watch != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🔔 ${won(watch.cost)}원보다 싸지면 알려 드려요 (6시간마다 확인)", fontSize = 12.5.sp, color = Good, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Text("끄기", fontSize = 12.5.sp, color = p.sub, modifier = Modifier.clickable { onToggleWatch(watch) }.padding(6.dp))
+                    } else Text(
+                        "🔔 이 상품 가격 지켜보기 (이월·세일로 싸지면 알림)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Brand,
+                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).border(1.dp, Brand.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                            .clickable {
+                                onToggleWatch(PriceWatch(info.query, mine?.unit?.per, mine?.let { shownUnit(it, LiveSort.UNIT, true)?.value }, info.total, info.site,
+                                    System.currentTimeMillis(), url = info.url, title = info.name))
+                            }.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
                 }
                 if (info.platform == "cafe24") {
                     Spacer(Modifier.height(10.dp))

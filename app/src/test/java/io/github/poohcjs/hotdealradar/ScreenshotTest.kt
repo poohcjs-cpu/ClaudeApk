@@ -195,6 +195,28 @@ class ScreenshotTest {
         )
     }
 
+    /** 패션: 브랜드 공식몰(TBH SHOP) 링크를 공유 → 품번으로 다나와·에누리와 비교, 가격 지켜보기, 패션몰 바로 열기 */
+    @Test @Config(qualifiers = "w400dp-h1900dp-xxhdpi")
+    fun searchFashionLink() = shot("6_search_fashion_link", withBar = Tab.SEARCH) {
+        val url = "https://tbhshop.co.kr/goods/view/27500"
+        val info = io.github.poohcjs.hotdealradar.data.LinkInfo(url, "tbhshop.co.kr", "TBHSHOP", "마인드브릿지 코듀로이 카라 세미오버핏 퀼팅 점퍼", 88000,
+            io.github.poohcjs.hotdealradar.data.ShipRule(0), "", null, "M1JP7101", "마인드브릿지")
+        val mine = io.github.poohcjs.hotdealradar.data.LiveProduct("link:1", info.name, "", 88000, null, null, emptyList(), false, false, -1,
+            mall = "TBHSHOP (공유한 링크)", link = url, shippingFee = 0, total = 88000, source = io.github.poohcjs.hotdealradar.data.LiveSource.MALL)
+        val dn = io.github.poohcjs.hotdealradar.data.LiveProduct("124649647", "마인드브릿지 스토커즈PICK코듀로이 카라 세미오버핏 퀼팅 점퍼 3color M1JP7101", "", 137230, 2,
+            null, emptyList(), false, false, 0, category = "점퍼")
+        val results = io.github.poohcjs.hotdealradar.data.mergeSources(listOf(dn), emptyList(), emptyList(), listOf(mine))
+        SearchScreen(
+            index, s, favs, emptyList(), {},
+            LiveSearchState("M1JP7101", false, results, null, System.currentTimeMillis(), sites = mapOf(
+                io.github.poohcjs.hotdealradar.data.LiveSource.DANAWA to io.github.poohcjs.hotdealradar.ui.SiteState(false, 1),
+                io.github.poohcjs.hotdealradar.data.LiveSource.ENURI to io.github.poohcjs.hotdealradar.ui.SiteState(false, 1),
+            ), history = io.github.poohcjs.hotdealradar.data.PriceHistory(emptyList(), "2026-11", 6)),
+            {}, {}, none, {}, {},
+            link = io.github.poohcjs.hotdealradar.ui.LinkState(url, false, info, null, false),
+        )
+    }
+
     @Test @Config(qualifiers = "w400dp-h1600dp-xxhdpi")
     fun searchSharedLink() = shot("6_search_link", withBar = Tab.SEARCH) {
         val url = "https://gunbong1987.com/product/x/20/category/26/display/1/"

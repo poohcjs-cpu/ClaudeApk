@@ -178,7 +178,17 @@ fun liveDeals(posts: List<Item>, query: String): List<LiveProduct> {
  * 가장 싼 결과가 다나와·에누리 최저(누구나 쉽게 찾는 값)보다 얼마나 싼지(%). 같은 단위로 비교할 수 있을 때만.
  * 양수면 이 앱이 더 싸게 찾은 것.
  */
-fun savingVsMarket(list: List<LiveProduct>, withShipping: Boolean): Pair<LiveProduct, Int>? {
+fun savingVsMarket(list: List<LiveProduct>, withShipping: Boolean, code: String? = null): Pair<LiveProduct, Int>? {
+    // 품번 검색이면 같은 품번 상품끼리 가격(배송비 포함)으로
+    if (code != null) {
+        val same = list.filter { !it.used && (it.name.contains(code, ignoreCase = true) || it.pcode.startsWith("link:")) }
+        val top = same.minByOrNull { shownCost(it, LiveSort.PRICE, withShipping) } ?: return null
+        if (top.source.isMarket) return null
+        val market = same.filter { it.source.isMarket }.minByOrNull { shownCost(it, LiveSort.PRICE, withShipping) } ?: return null
+        val tc = shownCost(top, LiveSort.PRICE, withShipping)
+        val mc = shownCost(market, LiveSort.PRICE, withShipping)
+        return if (mc > tc) market to ((mc - tc) * 100 / mc).toInt() else null
+    }
     val sorted = sortLive(list.filter { !it.used }, LiveSort.UNIT, withShipping)
     val top = sorted.firstOrNull() ?: return null
     if (top.source.isMarket) return null

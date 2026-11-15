@@ -111,14 +111,14 @@ fun SettingsScreen(
             watches.forEach { w ->
                 Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(w.query, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = p.ink)
+                        Text((if (w.url != null) "🔗 " else "") + w.label, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = p.ink, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         Text(
                             (w.unit?.let { "${io.github.poohcjs.hotdealradar.data.won(it)}원/${w.per}" } ?: w.cost?.let { "${io.github.poohcjs.hotdealradar.data.won(it)}원" } ?: "-") +
                                 (if (w.mall.isNotBlank()) " · 알림 걸 때 ${w.mall}" else ""),
                             fontSize = 12.sp, color = p.sub,
                         )
                     }
-                    Text("끄기", fontSize = 13.sp, color = p.sub, modifier = Modifier.clickable { onRemoveWatch(w.query) }.padding(8.dp))
+                    Text("끄기", fontSize = 13.sp, color = p.sub, modifier = Modifier.clickable { onRemoveWatch(w.key) }.padding(8.dp))
                 }
             }
         }

@@ -256,4 +256,47 @@ class MultiSourceTest {
         val byCost = io.github.poohcjs.hotdealradar.data.PriceWatch("게임패드", cost = 50000)
         assertEquals(20, io.github.poohcjs.hotdealradar.work.DealCheckWorker.watchSaving(byCost, listing("게임패드 X", 40000, "A"))!!.first)
     }
+
+    // ── 품번(모델 번호)으로 찾기 · 패션 공식몰 ──
+    @Test fun detectsProductCodes() {
+        val pc = io.github.poohcjs.hotdealradar.data.ProductCode
+        assertTrue(pc.isCode("M1JP7101"))
+        assertTrue(pc.isCode("SM-S931N"))
+        assertTrue(pc.isCode("MKFW4KH"))
+        assertFalse(pc.isCode("1000ml"))
+        assertFalse(pc.isCode("iphone15"))
+        assertFalse(pc.isCode("3color"))
+        assertEquals("M1JP7101", pc.find("마인드브릿지 스토커즈PICK코듀로이 카라 세미오버핏 퀼팅 점퍼 3color M1JP7101"))
+        assertNull(pc.find("38년 건봉 돼지국밥 950g 3개"))
+        assertTrue(pc.isQueryCode(" M1JP7101 "))
+        assertFalse(pc.isQueryCode("마인드브릿지 M1JP7101"))
+    }
+
+    @Test fun readsBrandMallLinkWithCode() {
+        val info = LinkReader.parse(res("tbh_product.html"), "https://tbhshop.co.kr/goods/view/27330")
+        assertEquals("M1KT7220", info.code)
+        assertEquals("마인드브릿지", info.brand)
+        assertEquals("마인드브릿지 울혼방브이넥니트", info.name)
+        assertEquals(80900L, info.price)
+        assertEquals("M1KT7220", info.query) // 품번으로 다른 곳을 찾는다
+        val fm = io.github.poohcjs.hotdealradar.data.FashionMalls
+        assertTrue(fm.isTbhBrand(info.brand))
+        assertEquals("TBH SHOP (공식몰)", fm.links("M1JP7101", true).first().first)
+        assertEquals("https://www.29cm.co.kr/store/search?keyword=M1JP7101", fm.links("M1JP7101", false).first().second)
+        assertTrue(fm.isFashion(listOf("자켓")))
+        assertFalse(fm.isFashion(listOf("롤화장지")))
+    }
+
+    @Test fun codeSearchSavingsByPrice() {
+        val market = listing("마인드브릿지 스토커즈PICK코듀로이 카라 세미오버핏 퀼팅 점퍼 3color M1JP7101", 137230, "x").copy(pcode = "124649647", mall = null, unit = null)
+        val link = listing("마인드브릿지 코듀로이 퀼팅 점퍼", 88000, "TBHSHOP (공유한 링크)", 0, LiveSource.MALL).copy(pcode = "link:1", unit = null)
+        val merged = mergeSources(listOf(market), emptyList(), emptyList(), listOf(link))
+        val saving = io.github.poohcjs.hotdealradar.data.savingVsMarket(merged, true, "M1JP7101")!!
+        assertEquals(35, saving.second)
+        assertEquals(137230L, saving.first.price)
+        val w = io.github.poohcjs.hotdealradar.data.PriceWatch("M1JP7101", cost = 88000, url = "https://tbhshop.co.kr/goods/view/1", title = "점퍼")
+        assertEquals("https://tbhshop.co.kr/goods/view/1", w.key)
+        assertTrue(w.searchable)
+        assertFalse(io.github.poohcjs.hotdealradar.data.PriceWatch("코듀로이 점퍼", url = "u").searchable)
+    }
 }

@@ -241,8 +241,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 .onSuccess { info ->
                     val known = (prefs.userMalls + MallDirectory.SEED).any { it.host == info.host }
                     _link.value = LinkState(url, false, info, if (info.price == null) "이 페이지에서 가격을 찾지 못했어요" else null, known)
-                    val q = hintQuery ?: linkQuery(info.name)
-                    if (q.length >= 2) searchLive(q)
+                    // 품번이 있으면 품번으로 (패션·가전은 이름이 쇼핑몰마다 달라 품번이 정확하다)
+                    val q = info.code ?: hintQuery ?: linkQuery(info.name)
+                    if (q.length >= 2 && (info.code != null || hintQuery == null)) searchLive(q)
                 }
                 .onFailure { e ->
                     _link.value = LinkState(url, false, null, if (e is LiveBlocked) e.message else "링크를 읽지 못했어요 (${e.javaClass.simpleName})")
@@ -272,12 +273,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 가격 알림 걸기/풀기 (같은 검색어는 하나만) */
     fun toggleWatch(w: io.github.poohcjs.hotdealradar.data.PriceWatch) {
-        prefs.updateWatches { list -> if (list.any { it.query == w.query }) list.filter { it.query != w.query } else listOf(w) + list }
+        prefs.updateWatches { list -> if (list.any { it.key == w.key }) list.filter { it.key != w.key } else listOf(w) + list }
         // 처음 거는 알림이면 바로 다음 확인부터 동작하도록 주기 작업을 보장
         DealCheckWorker.schedule(getApplication(), true)
     }
 
-    fun removeWatch(query: String) = prefs.updateWatches { list -> list.filter { it.query != query } }
+    fun removeWatch(key: String) = prefs.updateWatches { list -> list.filter { it.key != key } }
 
     /** 관심 키워드로 등록 → 이 말이 들어간 커뮤니티 핫딜이 올라오면 알림 */
     fun watchKeyword(word: String) {

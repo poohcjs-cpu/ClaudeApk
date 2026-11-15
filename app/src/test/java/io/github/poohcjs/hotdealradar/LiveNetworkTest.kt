@@ -86,4 +86,16 @@ class LiveNetworkTest {
         println("  링크: ${info.site} | ${info.name} | ${info.price}원 + ${info.fee} = ${info.total} | ${info.platform}")
         assertTrue(info.price != null && info.platform == "cafe24")
     }
+
+    /** 패션 품번: 다나와·에누리에 있는 값과 공식몰(TBH SHOP) 링크 가격 */
+    @Test fun fashionCodeAndBrandLink() = runBlocking {
+        val c = LiveSearchClient()
+        val dn = c.search("M1JP7101")
+        val en = c.enuriSearch("M1JP7101")
+        println("[M1JP7101] 다나와 ${dn.map { it.name to it.price }} · 에누리 ${en.map { it.name to it.price }}")
+        assertTrue((dn + en).any { it.name.contains("M1JP7101") })
+        val info = c.readLink("https://tbhshop.co.kr/goods/view/27330")
+        println("  TBH 링크: ${info.name} | 품번 ${info.code} | ${info.price}원 + 배송 ${info.fee} | ${info.brand}")
+        assertTrue(info.code != null && info.price != null)
+    }
 }
