@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">핏키보드</string>
+    <string name="ime_name">핏키보드 (내 손에 맞춤)</string>
+    <string name="subtype_ko">한국어·영어</string>
+</resources>

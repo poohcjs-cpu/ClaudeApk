@@ -1,0 +1,80 @@
+package io.github.poohcjs.fitkey
+
+import android.app.Application
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.os.Looper
+import android.view.View
+import androidx.test.core.app.ApplicationProvider
+import io.github.poohcjs.fitkey.engine.KeyboardLayout
+import io.github.poohcjs.fitkey.engine.Lang
+import io.github.poohcjs.fitkey.engine.Mode
+import io.github.poohcjs.fitkey.engine.ShiftState
+import io.github.poohcjs.fitkey.engine.Suggestion
+import io.github.poohcjs.fitkey.engine.SuggestionBar
+import io.github.poohcjs.fitkey.ime.FitKeyStore
+import io.github.poohcjs.fitkey.ime.KeyboardView
+import io.github.poohcjs.fitkey.ui.MainActivity
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import java.io.File
+
+/** 화면 그림 (-Pscreenshots 로만 실행) */
+@RunWith(RobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [35], application = Application::class, qualifiers = "w400dp-h880dp-xxhdpi")
+class ScreenshotTest {
+    private val ctx: Context get() = ApplicationProvider.getApplicationContext()
+
+    private fun save(name: String, v: View, width: Int = 1200) {
+        v.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        v.layout(0, 0, v.measuredWidth, v.measuredHeight)
+        val bmp = Bitmap.createBitmap(v.measuredWidth, v.measuredHeight, Bitmap.Config.ARGB_8888)
+        v.draw(Canvas(bmp))
+        val dir = File(System.getProperty("screenshots.dir") ?: "build/screenshots").apply { mkdirs() }
+        File(dir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    private fun keyboard(block: KeyboardView.() -> Unit = {}) = KeyboardView(ctx).apply { block() }
+
+    @Test fun koreanKeyboard() = save("1_ko", keyboard {
+        suggestions = SuggestionBar(listOf(Suggestion("안녕하세오", null, true), Suggestion("안녕하세요", null, false), Suggestion("안녕하세요오", null, false)), 1)
+    })
+
+    @Test fun koreanShift() = save("2_ko_shift", keyboard { shift = ShiftState.ONCE })
+
+    @Test fun english() = save("3_en", keyboard { lang = Lang.EN; shift = ShiftState.ONCE; enterLabel = "보내기" })
+
+    @Test fun symbols() = save("4_symbols", keyboard { layout = KeyboardLayout.symbols(1); mode = Mode.SYMBOLS })
+
+    @Test @Config(qualifiers = "w400dp-h880dp-night-xxhdpi")
+    fun dark() = save("5_dark", keyboard { suggestions = SuggestionBar(listOf(Suggestion("the", null, false), Suggestion("they", null, false), Suggestion("then", null, false)), 0); lang = Lang.EN })
+
+    @Test fun calibrationResult() {
+        FitKeyStore.init(ctx)
+        val t = FitKeyStore.touch
+        val l = KeyboardLayout.letters(true)
+        // 오른쪽 아래를 누르는 습관을 배운 모습
+        for (k in l.letters) repeat(10) { t.learn(k, k.cx + 0.25f + (k.cx - 5f) * 0.03f, k.cy + 0.18f) }
+        save("6_offsets", keyboard { layout = l; offsets = t.offsets(); stripHint = "주황 선: 글쇠마다 실제로 누르는 쪽" })
+        t.clear()
+    }
+
+    @Test fun home() {
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        shadowOf(Looper.getMainLooper()).idle()
+        val root = a.window.decorView
+        root.measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(2640, View.MeasureSpec.EXACTLY))
+        root.layout(0, 0, 1200, 2640)
+        val bmp = Bitmap.createBitmap(1200, 2640, Bitmap.Config.ARGB_8888)
+        root.draw(Canvas(bmp))
+        val dir = File(System.getProperty("screenshots.dir") ?: "build/screenshots").apply { mkdirs() }
+        File(dir, "7_home.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+}
