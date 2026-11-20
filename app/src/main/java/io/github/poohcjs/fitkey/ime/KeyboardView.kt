@@ -83,8 +83,12 @@ class KeyboardView(context: Context) : View(context) {
     var adjusting = false; set(v) { if (field != v) { field = v; requestLayout() }; adjustTarget = null; invalidate() }
     /** 보정 화면: 다음에 눌러야 할 글쇠 */
     var target: Char? = null; set(v) { field = v; invalidate() }
+    /** 보정 화면: 다음에 Shift를 눌러야 함 (쌍자음·ㅒ·ㅖ) */
+    var targetShift = false; set(v) { field = v; invalidate() }
     /** 배운 치우침 보기 (글쇠 단위) */
     var offsets: Map<Char, Pair<Float, Float>>? = null; set(v) { field = v; invalidate() }
+    /** 보정 결과: 글쇠별 빗나간 비율 (0~1) → 초록·노랑·빨강으로 칠한다 */
+    var missRates: Map<Char, Float>? = null; set(v) { field = v; invalidate() }
 
     private val dp = resources.displayMetrics.density
     private val sp = resources.displayMetrics.scaledDensity.coerceAtMost(dp * 1.2f)
@@ -160,9 +164,17 @@ class KeyboardView(context: Context) : View(context) {
             isFn(k) -> fnBg
             else -> keyBg
         }
+        missRates?.get(k.letter)?.let { r ->
+            val tint = when {
+                r >= 0.25f -> 0xFFFF6B3D.toInt()
+                r >= 0.1f -> 0xFFFFC233.toInt()
+                else -> 0xFF12A150.toInt()
+            }
+            paint.color = blend(paint.color, tint, if (dark) 0.45f else 0.32f)
+        }
         if (isPressed) paint.color = blend(paint.color, if (dark) Color.WHITE else Color.BLACK, 0.12f)
         c.drawRoundRect(rect, 7 * dp, 7 * dp, paint)
-        if (target != null && k.letter == target) {
+        if ((target != null && k.letter == target) || (targetShift && k.kind == KeyKind.SHIFT)) {
             paint.style = Paint.Style.STROKE; paint.strokeWidth = 2.5f * dp; paint.color = 0xFFFF6B3D.toInt()
             c.drawRoundRect(rect, 7 * dp, 7 * dp, paint)
             paint.style = Paint.Style.FILL

@@ -207,4 +207,46 @@ class EngineTest {
         e.startInput(FieldInfo(numeric = true))
         assertEquals(io.github.poohcjs.fitkey.engine.Mode.NUMPAD, e.mode)   // 숫자 칸은 숫자 패드로 시작
     }
+
+    /** 보정 문장 고르기: 자주 빗나가는 글쇠(ㅠ·ㅋ)가 든 문장을 골라 내고, 결과에서 그 글쇠가 맨 앞에 나온다 */
+    @Test fun calibrationTargetsWeakKeys() {
+        val cal = Calibration(TouchModel(), layout)
+        val weak = setOf('b', 'z')
+        var picked = 0
+        var weakInPicked = 0
+        while (!cal.done) {
+            val keys = cal.targetKeys(cal.current!!)
+            if (cal.sentence >= 3) { picked++; if (keys.any { it.lowercaseChar() in weak }) weakInPicked++ }
+            keys.forEach { c ->
+                if (c == ' ') { cal.press(layout.keys.first { it.id == "space" }, 5f, 3.5f); return@forEach }
+                val k = layout.keyOf(c)!!
+                // ㅠ·ㅋ만 오른쪽으로 크게 빗나간다 (옆 글쇠가 눌림)
+                val dx = if (c.lowercaseChar() in weak) 0.6f else 0f
+                cal.press(layout.keyAt(k.cx + dx, k.cy)!!, k.cx + dx, k.cy)
+            }
+            if (!cal.done && cal.typed.isNotEmpty()) cal.next()
+        }
+        assertTrue("고른 문장 $picked 개 중 약한 글쇠 포함 $weakInPicked", picked in 1..11 && weakInPicked * 10 >= picked * 7)
+        val top = cal.report().take(2).map { it.letter }.toSet()
+        assertEquals(weak, top)
+        assertEquals(cal.totalLetters, cal.covered)
+    }
+
+    @Test fun calibrationCanStopEarly() {
+        val cal = Calibration(TouchModel(), layout)
+        repeat(3) {
+            cal.targetKeys(cal.current!!).forEach { c ->
+                if (c == ' ') cal.press(layout.keys.first { it.id == "space" }, 5f, 3.5f)
+                else {
+                    // 쌍자음(대문자)은 Shift를 누른 뒤 그 글쇠
+                    if (c.isUpperCase()) layout.keys.first { it.kind == io.github.poohcjs.fitkey.engine.KeyKind.SHIFT }.let { cal.press(it, it.cx, it.cy) }
+                    layout.keyOf(c)!!.let { cal.press(it, it.cx, it.cy) }
+                }
+            }
+        }
+        assertEquals(3, cal.sentence)
+        cal.finish()
+        assertTrue(cal.done)
+        assertTrue(cal.samples.size > 60)
+    }
 }

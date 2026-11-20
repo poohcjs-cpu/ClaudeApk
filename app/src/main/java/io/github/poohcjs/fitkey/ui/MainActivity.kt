@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -309,14 +310,21 @@ private fun CalibrationScreen(onDone: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(20.dp)) {
             Text("내 손에 맞추기", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-            Text("아래 문장을 평소처럼 쳐 주세요. 틀리면 지우고 고쳐도 되고, 오타가 남아 있어도 ‘다음 문장’을 누르면 돼요. 일부러 정확히 누르려고 애쓰지 않는 게 좋아요.",
+            Text("아래 문장을 평소처럼 쳐 주세요. 틀리면 지우고 고쳐도 되고, 오타가 남아 있어도 ‘다음 문장’을 누르면 돼요. 일부러 정확히 누르려고 애쓰지 않는 게 좋아요. 처음 3문장 뒤에는 덜 잰 글쇠·자주 빗나가는 글쇠가 많은 문장을 골라 내고, 모든 글쇠를 충분히 재면 끝나요 (보통 8~12문장).",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp)
             Spacer(Modifier.height(18.dp))
             version.let { }
             if (!cal.done) {
                 val sent = cal.current!!
-                Text("문장 ${cal.sentence + 1} / ${cal.sentences.size}" + if (justDone) "  ✓ 앞 문장 배웠어요" else "", fontSize = 12.5.sp,
+                Text("문장 ${cal.sentence + 1}" + if (justDone) "  ✓ 앞 문장 배웠어요" else "", fontSize = 12.5.sp,
                     color = if (justDone) MainActivity.GOOD else MaterialTheme.colorScheme.onSurfaceVariant)
+                // 진행: 글쇠 26개 중 충분히 잰 글쇠 (부족한 글쇠가 많이 든 문장을 골라 내요)
+                Spacer(Modifier.height(4.dp))
+                LinearProgressIndicator(progress = { cal.covered.toFloat() / cal.totalLetters }, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)))
+                Text(
+                    "충분히 잰 글쇠 ${cal.covered} / ${cal.totalLetters}" + if (cal.sentence >= 3) " · 부족하거나 자주 빗나가는 글쇠가 많은 문장을 골라 내고 있어요" else "",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 16.sp, modifier = Modifier.padding(top = 4.dp),
+                )
                 Spacer(Modifier.height(6.dp))
                 Text(sent.text, fontSize = 22.sp, lineHeight = 31.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(12.dp))
@@ -348,6 +356,10 @@ private fun CalibrationScreen(onDone: () -> Unit) {
                     Button(onClick = { cal.next(); justDone = true; bump() }, enabled = cal.enough) { Text("다음 문장 →") }
                     OutlinedButton(onClick = { cal.skip(); justDone = false; bump() }) { Text("건너뛰기") }
                 }
+                if (cal.sentence >= 3) {
+                    Text("여기까지로 저장하기", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable { cal.finish(); bump() }.padding(vertical = 10.dp))
+                }
             } else {
                 val n = cal.samples.size
                 val afterMiss = remember(cal.samples.size) { cal.missesAfter() }
@@ -358,6 +370,24 @@ private fun CalibrationScreen(onDone: () -> Unit) {
                 } else {
                     Text("글쇠 ${n}번 중 화면의 글쇠를 벗어난 터치: ${cal.misses}번 (${pct(cal.misses, n)}%)", fontSize = 14.sp)
                     Text("배운 습관으로 다시 판정하면: ${afterMiss}번 (${pct(afterMiss, n)}%)", fontSize = 14.sp, color = MainActivity.GOOD, fontWeight = FontWeight.Bold)
+                }
+                // 글쇠별 결과: 보정이 많이 필요한 글자부터
+                val reports = remember(cal.samples.size) { cal.report().filter { it.n > 0 } }
+                val worst = reports.filter { it.misses > 0 || kotlin.math.hypot(it.offset.first, it.offset.second) > 0.15f }.take(6)
+                if (worst.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text("보정이 많이 필요한 글자", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    worst.forEach { r ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(keyName(r.letter), fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(56.dp))
+                            Text(
+                                "${r.n}번 중 ${r.misses}번 빗나감" + (direction(r.offset)?.let { " · $it 치우침" } ?: ""),
+                                fontSize = 13.5.sp, color = if (r.missRate >= 0.25f) MainActivity.ORANGE else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                    Text("키보드 색: 초록 = 잘 맞음, 노랑 = 가끔 빗나감, 주황 = 자주 빗나감. 주황 선은 실제로 누르는 쪽이에요.",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
                 }
                 val spread = FitKeyStore.touch.averageSpread()
                 if (n > 0 && spread > 0.4f && settings.height < 1.2f) {
@@ -396,10 +426,22 @@ private fun CalibrationScreen(onDone: () -> Unit) {
     }
 }
 
+/** 글쇠 이름: 한글 자모와 영문 (예: ㅔ p) */
+private fun keyName(letter: Char): String = "${io.github.poohcjs.fitkey.engine.Hangul.jamoOf(letter) ?: letter} $letter"
+
+/** 치우친 방향 (글쇠 너비의 8% 넘게 치우칠 때만) */
+private fun direction(o: Pair<Float, Float>): String? {
+    val h = when { o.first > 0.08f -> "오른쪽"; o.first < -0.08f -> "왼쪽"; else -> null }
+    val v = when { o.second > 0.08f -> "아래"; o.second < -0.08f -> "위"; else -> null }
+    return listOfNotNull(h, v).joinToString(" ").ifEmpty { null }?.let { "$it(으)로" }
+}
+
 private fun refreshCalibrationView(v: KeyboardView, cal: Calibration) {
     if (cal.done) {
         v.target = null
+        v.targetShift = false
         v.offsets = FitKeyStore.touch.offsets()
+        v.missRates = cal.report().filter { it.n > 0 }.associate { it.letter to it.missRate }
         v.lang = Lang.KO
         v.shift = ShiftState.OFF
         return
@@ -407,7 +449,10 @@ private fun refreshCalibrationView(v: KeyboardView, cal: Calibration) {
     val sent = cal.current ?: return
     v.lang = sent.lang
     v.shift = if (cal.shift) ShiftState.ONCE else ShiftState.OFF
-    v.target = cal.nextKey()?.takeIf { it != ' ' }?.lowercaseChar()
+    val nk = cal.nextKey()?.takeIf { it != ' ' }
+    // 쌍자음·ㅒ·ㅖ는 먼저 Shift에 테두리
+    v.targetShift = nk != null && nk.isUpperCase() && !cal.shift
+    v.target = if (v.targetShift) null else nk?.lowercaseChar()
 }
 
 /** 키보드 크기·위치: 삼성 키보드처럼 파란 테두리의 손잡이를 끌어서 맞춘다 */

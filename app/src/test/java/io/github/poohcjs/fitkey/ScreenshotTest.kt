@@ -62,7 +62,10 @@ class ScreenshotTest {
         val l = KeyboardLayout.letters(true)
         // 오른쪽 아래를 누르는 습관을 배운 모습
         for (k in l.letters) repeat(10) { t.learn(k, k.cx + 0.25f + (k.cx - 5f) * 0.03f, k.cy + 0.18f) }
-        save("6_offsets", keyboard { layout = l; offsets = t.offsets(); stripHint = "주황 선: 글쇠마다 실제로 누르는 쪽" })
+        save("6_offsets", keyboard {
+            layout = l; offsets = t.offsets(); stripHint = "보정 결과"
+            missRates = l.letters.associate { it.letter!! to when (it.letter) { 'p', 'b' -> 0.33f; 'z', 'o', 'l' -> 0.15f; else -> 0.02f } }
+        })
         t.clear()
     }
 
