@@ -64,6 +64,7 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
     override fun onCreateInputView(): View {
         val v = KeyboardView(this)
         v.listener = this
+        v.toolbar = true
         v.hitTest = { layout, x, y -> if (layout === letters) FitKeyStore.touch.hit(layout, x, y) else layout.keyAt(x, y) }
         v.onAspect = { FitKeyStore.touch.aspect = it }
         // 화면 아래 내비게이션 막대에 가리지 않게
@@ -125,6 +126,9 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        view?.let { v ->
+            if (v.adjusting) { v.adjusting = false; onAdjust(v.heightScale, v.widthScale, v.align, v.bottomGap, true) }
+        }
         engine.resetWord(finish = true)
         FitKeyStore.saveLang(this, engine.lang)
         FitKeyStore.save()
@@ -201,6 +205,27 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
         }
     }
 
+    /** 스페이스바를 옆으로 밀면 한/영 바꾸기 */
+    override fun onSpaceSwipe(dir: Int) {
+        engine.onLang()
+        FitKeyStore.saveLang(this, engine.lang)
+    }
+
+    /** 추천 막대 자리의 도구 단추 */
+    override fun onToolbar(action: String) {
+        when (action) {
+            "size" -> { engine.resetWord(finish = true); view?.adjusting = true }
+            "settings" -> startActivity(
+                android.content.Intent(this, io.github.poohcjs.fitkey.ui.MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+
+    /** 손잡이로 크기·위치를 바꿈: '확인'을 누르면 저장 */
+    override fun onAdjust(height: Float, width: Float, align: Float, gap: Int, done: Boolean) {
+        if (done) FitKeyStore.saveSettings(this, FitKeyStore.settings(this).copy(height = height, width = width, align = align, bottomGap = gap))
+    }
+
     /** 한 손 모드: 빈 쪽을 누르면 키보드를 그쪽으로 옮기고 기억한다 */
     override fun onSideTap(side: Int) {
         FitKeyStore.saveSettings(this, FitKeyStore.settings(this).copy(align = side.toFloat()))
@@ -214,11 +239,13 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
     companion object {
         /** 설정의 크기·위치를 키보드 화면에 (설정 앱의 미리보기도 같은 함수를 쓴다) */
         fun applyLook(v: KeyboardView, s: KeySettings) {
+            if (v.adjusting) return   // 손잡이로 조절하는 동안에는 화면 값이 앞선다
             v.heightScale = s.height
             v.widthScale = s.width
             v.align = s.align
             v.bottomGap = s.bottomGap
             v.vibrate = s.vibrate
+            v.spaceSwipeLang = s.spaceSwipeLang
             v.showStrip = true
         }
 

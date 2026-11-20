@@ -70,6 +70,14 @@ class ScreenshotTest {
 
     @Test fun calibrationScreen() = activityShot("9_calibrate", "calibrate")
 
+    @Test @Config(qualifiers = "w400dp-h880dp-night-xxhdpi")
+    fun calibrationDark() = activityShot("9_calibrate_dark", "calibrate")
+
+    @Test fun toolbarAndSwipeLabel() = save("11_toolbar", keyboard { toolbar = true })
+
+    @Test @Config(qualifiers = "w400dp-h880dp-night-xxhdpi")
+    fun adjustModeDark() = save("12_adjust_dark", keyboard { adjusting = true; widthScale = 0.85f; align = 0.4f })
+
     @Test fun sizeScreen() = activityShot("10_size", "size")
 
     private fun activityShot(name: String, screen: String) {

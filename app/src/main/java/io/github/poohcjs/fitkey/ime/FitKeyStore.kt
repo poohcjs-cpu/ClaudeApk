@@ -24,6 +24,8 @@ data class KeySettings(
     val align: Float = 0f,
     /** 아래 여백 (dp): 키보드를 위로 올린다 */
     val bottomGap: Int = 0,
+    /** 스페이스바를 옆으로 밀어 한/영 바꾸기 (끄면 밀어서 커서 이동) */
+    val spaceSwipeLang: Boolean = true,
 )
 
 /**
@@ -70,13 +72,15 @@ object FitKeyStore {
             height = p.getFloat("height", 1.0f), numberRow = p.getBoolean("numberRow", true), vibrate = p.getBoolean("vibrate", true),
             autoCorrect = p.getBoolean("autoCorrect", true), suggestions = p.getBoolean("suggestions", true), learn = p.getBoolean("learn", true),
             width = p.getFloat("width", 1.0f), align = p.getFloat("align", 0f), bottomGap = p.getInt("bottomGap", 0),
+            spaceSwipeLang = p.getBoolean("spaceSwipeLang", true),
         )
     }
 
     fun saveSettings(c: Context, s: KeySettings) {
         prefs(c).edit().putFloat("height", s.height).putBoolean("numberRow", s.numberRow).putBoolean("vibrate", s.vibrate)
             .putBoolean("autoCorrect", s.autoCorrect).putBoolean("suggestions", s.suggestions).putBoolean("learn", s.learn)
-            .putFloat("width", s.width).putFloat("align", s.align).putInt("bottomGap", s.bottomGap).apply()
+            .putFloat("width", s.width).putFloat("align", s.align).putInt("bottomGap", s.bottomGap)
+            .putBoolean("spaceSwipeLang", s.spaceSwipeLang).apply()
         listeners.toList().forEach { it() }
     }
 

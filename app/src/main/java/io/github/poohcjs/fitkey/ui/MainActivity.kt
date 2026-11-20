@@ -37,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -132,11 +133,14 @@ class MainActivity : ComponentActivity() {
 private fun App(tick: Int, start: String = "home") {
     var screen by remember { mutableStateOf(start) }
     BackHandler(enabled = screen != "home") { screen = "home" }
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
-        when (screen) {
-            "calibrate" -> CalibrationScreen { screen = "home" }
-            "size" -> SizeScreen { screen = "home" }
-            else -> HomeScreen(tick, onSize = { screen = "size" }) { screen = "calibrate" }
+    // Surface: 글자 기본색을 배경에 맞춘다 (어두운 화면에서 글자가 검게 나와 안 보이던 문제)
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground) {
+        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+            when (screen) {
+                "calibrate" -> CalibrationScreen { screen = "home" }
+                "size" -> SizeScreen { screen = "home" }
+                else -> HomeScreen(tick, onSize = { screen = "size" }) { screen = "calibrate" }
+            }
         }
     }
 }
@@ -228,6 +232,7 @@ private fun HomeScreen(tick: Int, onSize: () -> Unit, onCalibrate: () -> Unit) {
             }
             Spacer(Modifier.height(6.dp))
             Toggle("숫자 줄 보이기", "맨 위에 1~0 줄", s.numberRow) { update(s.copy(numberRow = it)) }
+            Toggle("스페이스바 밀어서 한/영 전환", "끄면 밀어서 커서 이동 (켜져 있을 때는 스페이스바를 길게 누른 뒤 밀면 커서 이동)", s.spaceSwipeLang) { update(s.copy(spaceSwipeLang = it)) }
             Toggle("자동 오타 수정", "스페이스를 누를 때 확실한 오타만 고쳐요", s.autoCorrect) { update(s.copy(autoCorrect = it)) }
             Toggle("추천 낱말", "키보드 위에 고칠 말·이어질 말을 보여 줘요", s.suggestions) { update(s.copy(suggestions = it)) }
             Toggle("쓰면서 배우기", "지우고 다시 친 글쇠, 고친 오타로 손 습관을 계속 배워요", s.learn) { update(s.copy(learn = it)) }
@@ -405,20 +410,24 @@ private fun refreshCalibrationView(v: KeyboardView, cal: Calibration) {
     v.target = cal.nextKey()?.takeIf { it != ' ' }?.lowercaseChar()
 }
 
-/** 키보드 크기·위치: 바로 보면서 조절 */
+/** 키보드 크기·위치: 삼성 키보드처럼 파란 테두리의 손잡이를 끌어서 맞춘다 */
 @Composable
 private fun SizeScreen(onDone: () -> Unit) {
     val c = LocalContext.current
     var s by remember { mutableStateOf(FitKeyStore.settings(c)) }
     fun update(n: KeySettings) { s = n; FitKeyStore.saveSettings(c, n) }
     val layout = remember(s.numberRow) { KeyboardLayout.letters(s.numberRow) }
+    var fine by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(20.dp)) {
             Text("키보드 크기·위치", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-            Text("아래 미리보기를 보면서 맞춰 주세요. 바꾸면 바로 키보드에 적용돼요. 글쇠가 클수록 덜 틀려요.",
-                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp)
-            Spacer(Modifier.height(14.dp))
+            Text(
+                "아래 키보드의 파란 손잡이를 끌어서 맞추세요.\n· 위·아래 손잡이: 높이\n· 왼쪽·오른쪽 손잡이: 너비 (줄이면 한 손 모드)\n· 가운데 ✥: 키보드 옮기기 (위·아래·옆)\n" +
+                    "다 되면 ‘확인’을 누르세요. 키보드를 쓰다가도 추천 막대의 ‘⤢ 크기·위치’를 누르면 같은 방법으로 바꿀 수 있어요.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 19.sp,
+            )
+            Spacer(Modifier.height(12.dp))
             Text("빠른 선택", fontWeight = FontWeight.Bold, fontSize = 14.sp)
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -427,31 +436,48 @@ private fun SizeScreen(onDone: () -> Unit) {
                 Preset("한 손 ←") { update(s.copy(width = 0.78f, align = -1f)) }
                 Preset("한 손 →") { update(s.copy(width = 0.78f, align = 1f)) }
             }
-            Spacer(Modifier.height(14.dp))
-            Text("높이 ${(s.height * 100).toInt()}%", fontSize = 14.sp)
-            Slider(s.height, { update(s.copy(height = Math.round(it * 20) / 20f)) }, valueRange = 0.8f..1.4f, steps = 11)
-            Text("너비 ${(s.width * 100).toInt()}%" + if (s.width < 0.95f) " (한 손 모드: 빈 쪽을 누르면 그쪽으로 옮겨져요)" else "", fontSize = 14.sp)
-            Slider(s.width, { update(s.copy(width = Math.round(it * 20) / 20f)) }, valueRange = 0.6f..1.0f, steps = 7)
-            if (s.width < 0.98f) {
-                Text("좌우 위치: " + if (s.align < -0.3f) "왼쪽" else if (s.align > 0.3f) "오른쪽" else "가운데", fontSize = 14.sp)
-                Slider(s.align, { update(s.copy(align = Math.round(it * 4) / 4f)) }, valueRange = -1f..1f, steps = 7)
-            }
-            Text("아래 여백 ${s.bottomGap}dp (키보드를 위로 올리기)", fontSize = 14.sp)
-            Slider(s.bottomGap.toFloat(), { update(s.copy(bottomGap = (Math.round(it / 4f) * 4))) }, valueRange = 0f..80f, steps = 19)
+            Text(
+                "지금: 높이 ${(s.height * 100).toInt()}% · 너비 ${(s.width * 100).toInt()}%" + (if (s.bottomGap > 0) " · 아래 여백 ${s.bottomGap}dp" else ""),
+                fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp),
+            )
             Toggle("숫자 줄 보이기", "맨 위에 1~0 줄", s.numberRow) { update(s.copy(numberRow = it)) }
-            Spacer(Modifier.height(10.dp))
-            Text("크기를 크게 바꿨다면 ‘내 손에 맞추기’를 한 번 더 하면 좋아요 (배운 습관은 글쇠 크기에 맞춰 그대로 쓰지만, 다시 재면 더 정확해요).",
-                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp)
-            Spacer(Modifier.height(10.dp))
-            Button(onClick = onDone) { Text("완료") }
+            Text(if (fine) "세밀하게 조절 ▴" else "세밀하게 조절 ▾", fontSize = 13.5.sp, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable { fine = !fine }.padding(vertical = 8.dp))
+            if (fine) {
+                Text("높이 ${(s.height * 100).toInt()}%", fontSize = 14.sp)
+                Slider(s.height, { update(s.copy(height = Math.round(it * 20) / 20f)) }, valueRange = 0.75f..1.5f)
+                Text("너비 ${(s.width * 100).toInt()}%", fontSize = 14.sp)
+                Slider(s.width, { update(s.copy(width = Math.round(it * 20) / 20f)) }, valueRange = 0.6f..1.0f)
+                Text("좌우 위치", fontSize = 14.sp)
+                Slider(s.align, { update(s.copy(align = Math.round(it * 4) / 4f)) }, valueRange = -1f..1f)
+                Text("아래 여백 ${s.bottomGap}dp", fontSize = 14.sp)
+                Slider(s.bottomGap.toFloat(), { update(s.copy(bottomGap = Math.round(it / 4f) * 4)) }, valueRange = 0f..120f)
+            }
+            Text("크기를 많이 바꿨다면 ‘내 손에 맞추기’를 한 번 더 하면 좋아요.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp)
         }
-        Text("미리보기", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 20.dp, bottom = 4.dp))
         AndroidView(
-            factory = { ctx -> KeyboardView(ctx).apply { this.layout = layout; stripHint = "미리보기" } },
+            factory = { ctx ->
+                KeyboardView(ctx).apply {
+                    this.layout = layout
+                    vibrate = s.vibrate
+                    adjusting = true
+                    listener = object : KeyboardView.Listener {
+                        override fun onKey(key: Key, ux: Float, uy: Float) {}
+                        override fun onAdjust(height: Float, width: Float, align: Float, gap: Int, done: Boolean) {
+                            update(s.copy(height = height, width = width, align = align, bottomGap = gap))
+                            if (done) onDone()
+                        }
+                    }
+                }
+            },
             update = { v ->
                 if (v.layout !== layout) v.layout = layout
-                io.github.poohcjs.fitkey.ime.FitKeyService.applyLook(v, s)
-                v.vibrate = false
+                v.heightScale = s.height
+                v.widthScale = s.width
+                v.align = s.align
+                v.bottomGap = s.bottomGap
+                v.spaceSwipeLang = s.spaceSwipeLang
+                if (!v.adjusting) v.adjusting = true
             },
             modifier = Modifier.fillMaxWidth(),
         )

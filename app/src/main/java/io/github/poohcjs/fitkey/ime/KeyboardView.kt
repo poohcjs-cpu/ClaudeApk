@@ -43,6 +43,12 @@ class KeyboardView(context: Context) : View(context) {
         fun onLangLongPress() {}
         /** 한 손 모드에서 빈 쪽을 누름: 키보드를 그쪽으로 옮기기 (-1 왼쪽, 1 오른쪽) */
         fun onSideTap(side: Int) {}
+        /** 스페이스바를 옆으로 밀기: 한/영 바꾸기 */
+        fun onSpaceSwipe(dir: Int) {}
+        /** 크기·위치 조절 중 (done: '확인'을 눌러 끝냄) */
+        fun onAdjust(height: Float, width: Float, align: Float, gap: Int, done: Boolean) {}
+        /** 추천 막대가 비었을 때의 도구 단추 ("size" 크기·위치, "settings" 설정) */
+        fun onToolbar(action: String) {}
     }
 
     var listener: Listener? = null
@@ -69,6 +75,12 @@ class KeyboardView(context: Context) : View(context) {
     var bottomGap = 0; set(v) { field = v.coerceIn(0, 120); requestLayout() }
     var vibrate = true
     var bottomInset = 0; set(v) { field = v; requestLayout() }
+    /** 스페이스바를 옆으로 밀면 한/영 바꾸기 (끄면 밀어서 커서 옮기기) */
+    var spaceSwipeLang = true; set(v) { field = v; invalidate() }
+    /** 추천이 없을 때 도구 단추(크기·위치, 설정)를 보여 줄지 */
+    var toolbar = false; set(v) { field = v; invalidate() }
+    /** 크기·위치 조절 모드: 파란 테두리와 손잡이를 끌어서 맞춘다 */
+    var adjusting = false; set(v) { if (field != v) { field = v; requestLayout() }; adjustTarget = null; invalidate() }
     /** 보정 화면: 다음에 눌러야 할 글쇠 */
     var target: Char? = null; set(v) { field = v; invalidate() }
     /** 배운 치우침 보기 (글쇠 단위) */
@@ -99,7 +111,8 @@ class KeyboardView(context: Context) : View(context) {
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        val h = (stripH + layout.rows * rowH + 6 * dp + bottomGap * dp).toInt() + bottomInset
+        // 조절 중에는 아래 손잡이가 잘리지 않게 조금 더 둔다
+        val h = (stripH + layout.rows * rowH + 6 * dp + bottomGap * dp + (if (adjusting) 14 * dp else 0f)).toInt() + bottomInset
         setMeasuredDimension(w, h)
     }
 
@@ -123,6 +136,7 @@ class KeyboardView(context: Context) : View(context) {
         for (k in layout.keys) drawKey(canvas, k)
         drawSideHandle(canvas)
         offsets?.let { drawOffsets(canvas, it) }
+        if (adjusting) { drawAdjust(canvas); return }
         pressed.firstOrNull { it.kind == KeyKind.LETTER || it.kind == KeyKind.DIGIT || it.kind == KeyKind.SYMBOL }?.let { drawPreview(canvas, it) }
     }
 
@@ -187,7 +201,7 @@ class KeyboardView(context: Context) : View(context) {
         }
         KeyKind.SHIFT -> if (mode == Mode.LETTERS) (if (shift == ShiftState.LOCK) "⇪" else "⇧") else k.text ?: "1/2"
         KeyKind.BACKSPACE -> "⌫"
-        KeyKind.SPACE -> if (lang == Lang.KO) "한국어" else "English"
+        KeyKind.SPACE -> (if (lang == Lang.KO) "한국어" else "English").let { if (spaceSwipeLang) "◂ $it ▸" else it }
         KeyKind.ENTER -> enterLabel
         KeyKind.LANG -> if (lang == Lang.KO) "한/A" else "A/한"
         KeyKind.MODE -> if (mode == Mode.LETTERS) "!#1" else if (lang == Lang.KO) "가나다" else "ABC"
@@ -197,10 +211,18 @@ class KeyboardView(context: Context) : View(context) {
     private fun drawStrip(c: Canvas) {
         val items = suggestions.items
         text.typeface = Typeface.DEFAULT
+        if (adjusting) {
+            text.textSize = 13 * sp; text.color = sub
+            c.drawText("손잡이를 끌어서 크기와 위치를 맞추세요", width / 2f, stripH / 2 - (text.descent() + text.ascent()) / 2, text)
+            return
+        }
         if (items.isEmpty()) {
             if (stripHint.isNotEmpty()) {
                 text.textSize = 13 * sp; text.color = sub
                 c.drawText(stripHint, width / 2f, stripH / 2 - (text.descent() + text.ascent()) / 2, text)
+            } else if (toolbar) {
+                drawToolButton(c, width * 0.25f, "⤢  크기·위치")
+                drawToolButton(c, width * 0.75f, "⚙  설정")
             }
             return
         }
@@ -217,6 +239,15 @@ class KeyboardView(context: Context) : View(context) {
                 c.drawRect(cellW * i - 0.5f * dp, stripH * 0.28f, cellW * i + 0.5f * dp, stripH * 0.72f, paint)
             }
         }
+    }
+
+    private fun drawToolButton(c: Canvas, cx: Float, label: String) {
+        text.textSize = 13.5f * sp; text.color = sub; text.typeface = Typeface.DEFAULT_BOLD
+        val w = text.measureText(label) + 24 * dp
+        val r = RectF(cx - w / 2, stripH * 0.18f, cx + w / 2, stripH * 0.82f)
+        paint.color = if (dark) 0xFF2A2C32.toInt() else 0xFFD9DDE3.toInt()
+        c.drawRoundRect(r, r.height() / 2, r.height() / 2, paint)
+        c.drawText(label, cx, r.centerY() - (text.descent() + text.ascent()) / 2, text)
     }
 
     private fun ellipsize(s: String, max: Float): String {
@@ -269,33 +300,156 @@ class KeyboardView(context: Context) : View(context) {
         if (r > 24 * dp) c.drawText("›", width - r / 2, cy, text)
     }
 
+    // ── 크기·위치 조절 (삼성 키보드처럼 손잡이를 끌어서) ──────────
+    private val frameT get() = stripH
+    private val frameB get() = stripH + layout.rows * rowH
+    private val frameL get() = left
+    private val frameR get() = left + areaW
+    private val frameCx get() = (frameL + frameR) / 2
+    private val frameCy get() = (frameT + frameB) / 2
+    private val btnY get() = frameB - rowH * 0.55f
+    private val btnReset get() = RectF(frameCx - 118 * dp, btnY - 21 * dp, frameCx - 8 * dp, btnY + 21 * dp)
+    private val btnOk get() = RectF(frameCx + 8 * dp, btnY - 21 * dp, frameCx + 118 * dp, btnY + 21 * dp)
+
+    private fun drawAdjust(c: Canvas) {
+        // 글쇠를 흐리게 덮고 파란 테두리
+        paint.color = if (dark) 0xB31B1C20.toInt() else 0xB3E6E8EC.toInt()
+        c.drawRect(0f, frameT, width.toFloat(), frameB, paint)
+        paint.style = Paint.Style.STROKE; paint.strokeWidth = 2.5f * dp; paint.color = brand
+        c.drawRect(frameL + 1.5f * dp, frameT + 1.5f * dp, frameR - 1.5f * dp, frameB - 1.5f * dp, paint)
+        paint.style = Paint.Style.FILL
+        // 손잡이: 위·아래(높이), 왼쪽·오른쪽(너비), 가운데(옮기기)
+        handle(c, frameCx, frameT, 54 * dp, 26 * dp, "≡")
+        handle(c, frameCx, frameB, 54 * dp, 26 * dp, "≡")
+        handle(c, frameL + 13 * dp, frameCy, 26 * dp, 54 * dp, "‖")
+        handle(c, frameR - 13 * dp, frameCy, 26 * dp, 54 * dp, "‖")
+        paint.color = brand
+        c.drawCircle(frameCx, frameCy, 28 * dp, paint)
+        text.color = Color.WHITE; text.textSize = 22 * sp; text.typeface = Typeface.DEFAULT_BOLD
+        c.drawText("✥", frameCx, frameCy - (text.descent() + text.ascent()) / 2, text)
+        // 단추
+        for ((r, label) in listOf(btnReset to "다시 설정", btnOk to "확인")) {
+            paint.color = Color.WHITE
+            paint.setShadowLayer(4 * dp, 0f, 1 * dp, 0x40000000)
+            c.drawRoundRect(r, r.height() / 2, r.height() / 2, paint)
+            paint.clearShadowLayer()
+            text.color = 0xFF15171C.toInt(); text.textSize = 16 * sp
+            c.drawText(label, r.centerX(), r.centerY() - (text.descent() + text.ascent()) / 2, text)
+        }
+    }
+
+    private fun handle(c: Canvas, cx: Float, cy: Float, w: Float, h: Float, glyph: String) {
+        paint.color = brand
+        val r = RectF(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
+        c.drawRoundRect(r, 8 * dp, 8 * dp, paint)
+        text.color = Color.WHITE; text.textSize = 16 * sp; text.typeface = Typeface.DEFAULT_BOLD
+        c.drawText(glyph, cx, cy - (text.descent() + text.ascent()) / 2, text)
+    }
+
+    private class Adjust(val what: String, val rx: Float, val ry: Float, val h: Float, val w: Float, val align: Float, val gap: Int, val left: Float, val areaW: Float)
+    private var adjustTarget: Adjust? = null
+
+    private fun adjustTouch(e: MotionEvent) {
+        val x = e.x
+        val y = e.y
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                fun near(hx: Float, hy: Float, r: Float = 34 * dp) = abs(x - hx) < r && abs(y - hy) < r
+                val what = when {
+                    btnReset.contains(x, y) -> "reset"
+                    btnOk.contains(x, y) -> "ok"
+                    near(frameCx, frameT) -> "top"
+                    near(frameCx, frameB) -> "bottom"
+                    near(frameL + 13 * dp, frameCy, 40 * dp) -> "left"
+                    near(frameR - 13 * dp, frameCy, 40 * dp) -> "right"
+                    near(frameCx, frameCy, 44 * dp) -> "move"
+                    else -> null
+                } ?: return
+                adjustTarget = Adjust(what, e.rawX, e.rawY, heightScale, widthScale, align, bottomGap, left, areaW)
+                buzz()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val a = adjustTarget ?: return
+                val dx = e.rawX - a.rx
+                val dy = e.rawY - a.ry
+                val baseRows = layout.rows * 50 * dp
+                val full = width - 2 * padH
+                fun place(newLeft: Float, newW: Float) {
+                    widthScale = newW / full
+                    val w = areaW
+                    val free = full - w
+                    align = if (free < 1f) 0f else (((newLeft - padH) / free) * 2f - 1f)
+                }
+                when (a.what) {
+                    "top" -> heightScale = (a.h * baseRows - dy) / baseRows
+                    "bottom" -> {
+                        // 아래 손잡이: 위쪽은 그대로 두고 아래 끝을 올리고 내린다
+                        val newGap = (a.gap - dy / dp).toInt().coerceIn(0, 120)
+                        val moved = (newGap - a.gap) * dp
+                        heightScale = (a.h * baseRows - moved) / baseRows
+                        bottomGap = newGap
+                    }
+                    "left" -> { val nw = (a.areaW - dx).coerceIn(full * 0.6f, full); place(a.left + a.areaW - nw, nw) }
+                    "right" -> { val nw = (a.areaW + dx).coerceIn(full * 0.6f, full); place(a.left, nw) }
+                    "move" -> {
+                        place((a.left + dx).coerceIn(padH, padH + full - a.areaW), a.areaW)
+                        bottomGap = (a.gap - dy / dp).toInt().coerceIn(0, 120)
+                    }
+                    else -> return
+                }
+                listener?.onAdjust(heightScale, widthScale, align, bottomGap, false)
+                invalidate()
+            }
+            MotionEvent.ACTION_UP -> {
+                val a = adjustTarget ?: return
+                adjustTarget = null
+                when (a.what) {
+                    "reset" -> if (btnReset.contains(x, y)) {
+                        heightScale = 1f; widthScale = 1f; align = 0f; bottomGap = 0
+                        listener?.onAdjust(1f, 1f, 0f, 0, false)
+                    }
+                    "ok" -> if (btnOk.contains(x, y)) {
+                        adjusting = false
+                        listener?.onAdjust(heightScale, widthScale, align, bottomGap, true)
+                    }
+                }
+                invalidate()
+            }
+            MotionEvent.ACTION_CANCEL -> adjustTarget = null
+        }
+    }
+
     // ── 터치 ──────────────────────────────────────────────
     private class Ptr(val key: Key, val ux: Float, val uy: Float, val downX: Float) {
         var longFired = false
         var cursorMode = false
+        var swiped = false
         var lastX = downX
     }
 
     private val ptrs = HashMap<Int, Ptr>()
+    /** 길게 누름·지우기 반복 타이머 (화면에 붙어 있는지와 상관없이 같은 방식으로 돈다) */
+    private val timers = android.os.Handler(android.os.Looper.getMainLooper())
     private var stripDown = -1
     private val longPress = Runnable { onLongPressTimeout() }
     private val repeatDelete = object : Runnable {
         override fun run() {
             if (ptrs.values.none { it.key.kind == KeyKind.BACKSPACE }) return
             listener?.onBackspace()
-            postDelayed(this, 55)
+            timers.postDelayed(this, 55)
         }
     }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (adjusting) { adjustTouch(e); return true }
         val i = e.actionIndex
         val id = e.getPointerId(i)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> down(id, e.getX(i), e.getY(i))
             MotionEvent.ACTION_MOVE -> for (p in 0 until e.pointerCount) move(e.getPointerId(p), e.getX(p))
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> up(id, e.getX(i), e.getY(i))
-            MotionEvent.ACTION_CANCEL -> { ptrs.clear(); pressed.clear(); removeCallbacks(longPress); removeCallbacks(repeatDelete); invalidate() }
+            MotionEvent.ACTION_CANCEL -> { ptrs.clear(); pressed.clear(); timers.removeCallbacks(longPress); timers.removeCallbacks(repeatDelete); invalidate() }
         }
         return true
     }
@@ -321,20 +475,30 @@ class KeyboardView(context: Context) : View(context) {
         ptrs[id] = Ptr(key, ux, uy, x)
         pressed += key
         buzz()
-        removeCallbacks(longPress)
+        timers.removeCallbacks(longPress)
         if (key.kind == KeyKind.BACKSPACE) {
             listener?.onBackspace()
-            removeCallbacks(repeatDelete)
-            postDelayed(repeatDelete, 420)
-        } else if (key.longPress != null || key.kind == KeyKind.LANG) {
-            postDelayed(longPress, 380)
+            timers.removeCallbacks(repeatDelete)
+            timers.postDelayed(repeatDelete, 420)
+        } else if (key.longPress != null || key.kind == KeyKind.LANG || key.kind == KeyKind.SPACE) {
+            timers.postDelayed(longPress, if (key.kind == KeyKind.SPACE) 350L else 380L)
         }
         invalidate()
     }
 
     private fun move(id: Int, x: Float) {
         val p = ptrs[id] ?: return
-        if (p.key.kind != KeyKind.SPACE) return
+        if (p.key.kind != KeyKind.SPACE || p.swiped) return
+        if (spaceSwipeLang && !p.cursorMode) {
+            // 스페이스바를 옆으로 밀면 한/영 바꾸기 (길게 누른 뒤 밀면 커서 이동)
+            if (abs(x - p.downX) > keyW * 0.9f) {
+                p.swiped = true
+                timers.removeCallbacks(longPress)
+                buzz()
+                listener?.onSpaceSwipe(if (x > p.downX) 1 else -1)
+            }
+            return
+        }
         if (!p.cursorMode && abs(x - p.downX) > keyW * 0.6f) p.cursorMode = true
         if (!p.cursorMode) return
         val step = keyW * 0.45f
@@ -346,12 +510,13 @@ class KeyboardView(context: Context) : View(context) {
         if (id == stripDown) {
             stripDown = -1
             if (y < stripH && suggestions.items.isNotEmpty()) listener?.onSuggestion((x / (width / 3f)).toInt().coerceIn(0, suggestions.items.lastIndex))
+            else if (y < stripH && toolbar && stripHint.isEmpty()) listener?.onToolbar(if (x < width / 2f) "size" else "settings")
             return
         }
         val p = ptrs.remove(id) ?: return
         pressed.remove(p.key)
-        if (ptrs.isEmpty()) { removeCallbacks(longPress); removeCallbacks(repeatDelete) }
-        if (!p.longFired && !p.cursorMode && p.key.kind != KeyKind.BACKSPACE) listener?.onKey(p.key, p.ux, p.uy)
+        if (ptrs.isEmpty()) { timers.removeCallbacks(longPress); timers.removeCallbacks(repeatDelete) }
+        if (!p.longFired && !p.cursorMode && !p.swiped && p.key.kind != KeyKind.BACKSPACE) listener?.onKey(p.key, p.ux, p.uy)
         invalidate()
     }
 
@@ -359,6 +524,11 @@ class KeyboardView(context: Context) : View(context) {
         val p = ptrs.values.lastOrNull() ?: return
         if (p.longFired) return
         when {
+            p.key.kind == KeyKind.SPACE -> {
+                // 길게 누름: 이제 밀면 커서가 움직인다
+                if (!p.swiped) { p.cursorMode = true; buzz() }
+                return
+            }
             p.key.kind == KeyKind.LANG -> { p.longFired = true; listener?.onLangLongPress() }
             p.key.longPress != null && mode == Mode.LETTERS || p.key.kind == KeyKind.COMMA || p.key.kind == KeyKind.PERIOD -> {
                 p.longFired = true
