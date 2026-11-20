@@ -66,6 +66,26 @@ class ScreenshotTest {
         t.clear()
     }
 
+    @Test fun oneHanded() = save("8_one_hand", keyboard { widthScale = 0.78f; align = 1f; bottomGap = 24 })
+
+    @Test fun calibrationScreen() = activityShot("9_calibrate", "calibrate")
+
+    @Test fun sizeScreen() = activityShot("10_size", "size")
+
+    private fun activityShot(name: String, screen: String) {
+        val intent = android.content.Intent(ctx, MainActivity::class.java).putExtra("screen", screen)
+        val a = Robolectric.buildActivity(MainActivity::class.java, intent).setup().get()
+        shadowOf(Looper.getMainLooper()).idle()
+        val root = a.window.decorView
+        root.measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(2640, View.MeasureSpec.EXACTLY))
+        root.layout(0, 0, 1200, 2640)
+        shadowOf(Looper.getMainLooper()).idle()
+        val bmp = Bitmap.createBitmap(1200, 2640, Bitmap.Config.ARGB_8888)
+        root.draw(Canvas(bmp))
+        val dir = File(System.getProperty("screenshots.dir") ?: "build/screenshots").apply { mkdirs() }
+        File(dir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
     @Test fun home() {
         val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         shadowOf(Looper.getMainLooper()).idle()

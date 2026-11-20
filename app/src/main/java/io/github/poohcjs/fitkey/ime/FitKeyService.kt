@@ -84,11 +84,7 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
         val wantRows = if (settings.numberRow) 5 else 4
         if (letters.rows != wantRows) letters = KeyboardLayout.letters(settings.numberRow)
         if (::engine.isInitialized) engine.layout = letters
-        view?.let {
-            it.heightScale = settings.height
-            it.vibrate = settings.vibrate
-            it.showStrip = true
-        }
+        view?.let { applyLook(it, settings) }
         syncView()
     }
 
@@ -205,12 +201,27 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
         }
     }
 
+    /** 한 손 모드: 빈 쪽을 누르면 키보드를 그쪽으로 옮기고 기억한다 */
+    override fun onSideTap(side: Int) {
+        FitKeyStore.saveSettings(this, FitKeyStore.settings(this).copy(align = side.toFloat()))
+    }
+
     override fun onLangLongPress() {
         // 다른 키보드(예: 삼성 키보드)로 바로 바꿀 수 있게
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
     }
 
     companion object {
+        /** 설정의 크기·위치를 키보드 화면에 (설정 앱의 미리보기도 같은 함수를 쓴다) */
+        fun applyLook(v: KeyboardView, s: KeySettings) {
+            v.heightScale = s.height
+            v.widthScale = s.width
+            v.align = s.align
+            v.bottomGap = s.bottomGap
+            v.vibrate = s.vibrate
+            v.showStrip = true
+        }
+
         private val SYM1 = KeyboardLayout.symbols(1)
         private val SYM2 = KeyboardLayout.symbols(2)
     }

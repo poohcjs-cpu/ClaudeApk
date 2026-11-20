@@ -41,6 +41,8 @@ class KeyboardView(context: Context) : View(context) {
         fun onCursorMove(steps: Int) {}
         /** 한/영 글쇠 길게: 다른 키보드로 바꾸기 */
         fun onLangLongPress() {}
+        /** 한 손 모드에서 빈 쪽을 누름: 키보드를 그쪽으로 옮기기 (-1 왼쪽, 1 오른쪽) */
+        fun onSideTap(side: Int) {}
     }
 
     var listener: Listener? = null
@@ -58,7 +60,13 @@ class KeyboardView(context: Context) : View(context) {
     var suggestions = SuggestionBar(); set(v) { field = v; invalidate() }
     var showStrip = true; set(v) { field = v; requestLayout(); invalidate() }
     var stripHint = ""; set(v) { field = v; invalidate() }
-    var heightScale = 1f; set(v) { field = v.coerceIn(0.75f, 1.5f); requestLayout(); invalidate() }
+    var heightScale = 1f; set(v) { field = v.coerceIn(0.75f, 1.5f); requestLayout(); invalidate(); notifyAspect() }
+    /** 글쇠 부분 너비 (1 = 화면 너비 전체, 0.7 = 한 손 모드 정도) */
+    var widthScale = 1f; set(v) { field = v.coerceIn(0.6f, 1f); invalidate(); notifyAspect() }
+    /** 글쇠 부분 좌우 위치 (-1 왼쪽 끝 ~ 0 가운데 ~ 1 오른쪽 끝). 너비가 1이면 의미 없음 */
+    var align = 0f; set(v) { field = v.coerceIn(-1f, 1f); invalidate() }
+    /** 키보드 아래 여백 (dp): 키보드를 위로 올린다 */
+    var bottomGap = 0; set(v) { field = v.coerceIn(0, 120); requestLayout() }
     var vibrate = true
     var bottomInset = 0; set(v) { field = v; requestLayout() }
     /** 보정 화면: 다음에 눌러야 할 글쇠 */
@@ -73,7 +81,12 @@ class KeyboardView(context: Context) : View(context) {
     private val stripH get() = if (showStrip) 44 * dp else 0f
     private val rowH get() = 50 * dp * heightScale
     private val padH get() = 3 * dp
-    private val keyW get() = (width - 2 * padH) / 10f
+    private val areaW get() = (width - 2 * padH) * widthScale
+    /** 글쇠 부분의 왼쪽 끝 */
+    private val left get() = padH + ((width - 2 * padH) - areaW) * (align + 1f) / 2f
+    private val keyW get() = areaW / 10f
+
+    private fun notifyAspect() { if (width > 0) onAspect(rowH / keyW) }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
@@ -86,13 +99,11 @@ class KeyboardView(context: Context) : View(context) {
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        val h = (stripH + layout.rows * rowH + 6 * dp).toInt() + bottomInset
+        val h = (stripH + layout.rows * rowH + 6 * dp + bottomGap * dp).toInt() + bottomInset
         setMeasuredDimension(w, h)
     }
 
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        if (w > 0) onAspect(rowH / keyW)
-    }
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) = notifyAspect()
 
     // ── 그리기 ────────────────────────────────────────────
     private val bg get() = if (dark) 0xFF1B1C20.toInt() else 0xFFE6E8EC.toInt()
@@ -104,9 +115,13 @@ class KeyboardView(context: Context) : View(context) {
     private val pressed = HashSet<Key>()
 
     override fun onDraw(canvas: Canvas) {
-        canvas.drawColor(bg)
+        // 내 영역 안에만 그린다 (drawColor는 화면 전체를 칠할 수 있어, 설정 앱 안에 넣었을 때 위쪽 글이 가려졌다)
+        canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
+        paint.color = bg
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
         if (showStrip) drawStrip(canvas)
         for (k in layout.keys) drawKey(canvas, k)
+        drawSideHandle(canvas)
         offsets?.let { drawOffsets(canvas, it) }
         pressed.firstOrNull { it.kind == KeyKind.LETTER || it.kind == KeyKind.DIGIT || it.kind == KeyKind.SYMBOL }?.let { drawPreview(canvas, it) }
     }
@@ -115,8 +130,8 @@ class KeyboardView(context: Context) : View(context) {
         val gapX = 2.5f * dp
         val gapY = 4f * dp
         out.set(
-            padH + k.x * keyW + gapX, stripH + k.row * rowH + gapY,
-            padH + (k.x + k.w) * keyW - gapX, stripH + (k.row + 1) * rowH - gapY + 1,
+            left + k.x * keyW + gapX, stripH + k.row * rowH + gapY,
+            left + (k.x + k.w) * keyW - gapX, stripH + (k.row + 1) * rowH - gapY + 1,
         )
     }
 
@@ -148,6 +163,10 @@ class KeyboardView(context: Context) : View(context) {
             else -> if (label.length > 2) 13.5f * sp else 17 * sp
         } * heightScale.coerceIn(0.9f, 1.15f)
         if (k.kind == KeyKind.SPACE) text.color = sub
+        // 좁은 글쇠(한 손 모드 등)에서는 글자가 넘치지 않게 줄인다
+        val maxW = rect.width() * 0.86f
+        val w = text.measureText(label)
+        if (w > maxW) text.textSize *= maxW / w
         val cy = rect.centerY() - (text.descent() + text.ascent()) / 2
         c.drawText(label, rect.centerX(), cy, text)
         // 길게 누르면 나오는 글자: 오른쪽 위에 작게
@@ -226,7 +245,7 @@ class KeyboardView(context: Context) : View(context) {
         paint.strokeWidth = 2.5f * dp
         for (k in layout.letters) {
             val (ox, oy) = map[k.letter] ?: continue
-            val cx = padH + k.cx * keyW
+            val cx = left + k.cx * keyW
             val cy = stripH + k.cy * rowH
             val tx = cx + ox * keyW
             val ty = cy + oy * rowH
@@ -234,6 +253,20 @@ class KeyboardView(context: Context) : View(context) {
             c.drawLine(cx, cy, tx, ty, paint)
             c.drawCircle(tx, ty, 4 * dp, paint)
         }
+    }
+
+    /** 한 손 모드: 빈 쪽에 '이쪽으로 옮기기' 화살표 */
+    private fun sideSpace(): Pair<Float, Float> = left to (width - (left + areaW))
+
+    private fun drawSideHandle(c: Canvas) {
+        if (widthScale > 0.92f) return
+        val (l, r) = sideSpace()
+        val top = stripH
+        val bottom = stripH + layout.rows * rowH
+        text.textSize = 26 * sp; text.color = sub; text.typeface = Typeface.DEFAULT
+        val cy = (top + bottom) / 2 - (text.descent() + text.ascent()) / 2
+        if (l > 24 * dp) c.drawText("‹", l / 2, cy, text)
+        if (r > 24 * dp) c.drawText("›", width - r / 2, cy, text)
     }
 
     // ── 터치 ──────────────────────────────────────────────
@@ -269,6 +302,12 @@ class KeyboardView(context: Context) : View(context) {
 
     private fun down(id: Int, x: Float, y: Float) {
         if (y < stripH) { stripDown = id; return }
+        // 한 손 모드의 빈 쪽을 누르면 키보드를 그쪽으로
+        if (widthScale <= 0.92f && y < stripH + layout.rows * rowH) {
+            val (l, r) = sideSpace()
+            if (x < left && l > 24 * dp) { listener?.onSideTap(-1); return }
+            if (x > left + areaW && r > 24 * dp) { listener?.onSideTap(1); return }
+        }
         // 빠르게 겹쳐 치기: 앞 손가락을 떼기 전에 다음 글쇠를 누르면 앞 글쇠를 먼저 낸다
         for ((pid, p) in ptrs.entries.toList()) {
             if (p.key.kind != KeyKind.BACKSPACE && p.key.kind != KeyKind.SPACE && !p.longFired) {
@@ -276,7 +315,7 @@ class KeyboardView(context: Context) : View(context) {
                 listener?.onKey(p.key, p.ux, p.uy)
             }
         }
-        val ux = (x - padH) / keyW
+        val ux = (x - left) / keyW
         val uy = (y - stripH) / rowH
         val key = hitTest(layout, ux, uy) ?: return
         ptrs[id] = Ptr(key, ux, uy, x)

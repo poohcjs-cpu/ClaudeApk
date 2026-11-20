@@ -18,6 +18,12 @@ data class KeySettings(
     val autoCorrect: Boolean = true,
     val suggestions: Boolean = true,
     val learn: Boolean = true,
+    /** 글쇠 부분 너비 (1 = 전체, 0.75 정도 = 한 손 모드) */
+    val width: Float = 1.0f,
+    /** 좌우 위치 (-1 왼쪽 ~ 0 가운데 ~ 1 오른쪽) */
+    val align: Float = 0f,
+    /** 아래 여백 (dp): 키보드를 위로 올린다 */
+    val bottomGap: Int = 0,
 )
 
 /**
@@ -63,12 +69,14 @@ object FitKeyStore {
         return KeySettings(
             height = p.getFloat("height", 1.0f), numberRow = p.getBoolean("numberRow", true), vibrate = p.getBoolean("vibrate", true),
             autoCorrect = p.getBoolean("autoCorrect", true), suggestions = p.getBoolean("suggestions", true), learn = p.getBoolean("learn", true),
+            width = p.getFloat("width", 1.0f), align = p.getFloat("align", 0f), bottomGap = p.getInt("bottomGap", 0),
         )
     }
 
     fun saveSettings(c: Context, s: KeySettings) {
         prefs(c).edit().putFloat("height", s.height).putBoolean("numberRow", s.numberRow).putBoolean("vibrate", s.vibrate)
-            .putBoolean("autoCorrect", s.autoCorrect).putBoolean("suggestions", s.suggestions).putBoolean("learn", s.learn).apply()
+            .putBoolean("autoCorrect", s.autoCorrect).putBoolean("suggestions", s.suggestions).putBoolean("learn", s.learn)
+            .putFloat("width", s.width).putFloat("align", s.align).putInt("bottomGap", s.bottomGap).apply()
         listeners.toList().forEach { it() }
     }
 

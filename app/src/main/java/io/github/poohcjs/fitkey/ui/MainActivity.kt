@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val dark = isSystemInDarkTheme()
             MaterialTheme(colorScheme = if (dark) darkColorScheme(primary = BRAND_DARK) else lightColorScheme(primary = BRAND)) {
-                App(tick.intValue)
+                App(tick.intValue, intent?.getStringExtra("screen") ?: "home")
             }
         }
     }
@@ -129,19 +129,20 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun App(tick: Int) {
-    var screen by remember { mutableStateOf("home") }
+private fun App(tick: Int, start: String = "home") {
+    var screen by remember { mutableStateOf(start) }
     BackHandler(enabled = screen != "home") { screen = "home" }
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
         when (screen) {
             "calibrate" -> CalibrationScreen { screen = "home" }
-            else -> HomeScreen(tick) { screen = "calibrate" }
+            "size" -> SizeScreen { screen = "home" }
+            else -> HomeScreen(tick, onSize = { screen = "size" }) { screen = "calibrate" }
         }
     }
 }
 
 @Composable
-private fun HomeScreen(tick: Int, onCalibrate: () -> Unit) {
+private fun HomeScreen(tick: Int, onSize: () -> Unit, onCalibrate: () -> Unit) {
     val c = LocalContext.current
     val enabled = remember(tick) { MainActivity.isEnabled(c) }
     val selected = remember(tick) { MainActivity.isSelected(c) }
@@ -209,9 +210,23 @@ private fun HomeScreen(tick: Int, onCalibrate: () -> Unit) {
         Card {
             Text("설정", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             Spacer(Modifier.height(6.dp))
-            Text("키보드 높이 ${(s.height * 100).toInt()}%", fontSize = 14.sp)
-            Text("글쇠가 클수록 덜 틀려요. 삼성 키보드와 비슷하게 쓰던 크기로 맞추거나 조금 키워 보세요.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Slider(s.height, { update(s.copy(height = (it * 20).toInt() / 20f)) }, valueRange = 0.8f..1.4f, steps = 11)
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .clickable(onClick = onSize).padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("키보드 크기·위치", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text(
+                        "높이 ${(s.height * 100).toInt()}% · 너비 ${(s.width * 100).toInt()}%" +
+                            (if (s.width < 0.95f) " · " + (if (s.align < -0.3f) "왼쪽" else if (s.align > 0.3f) "오른쪽" else "가운데") else "") +
+                            (if (s.bottomGap > 0) " · 아래 여백 ${s.bottomGap}dp" else ""),
+                        fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text("›", fontSize = 24.sp, color = MaterialTheme.colorScheme.primary)
+            }
+            Spacer(Modifier.height(6.dp))
             Toggle("숫자 줄 보이기", "맨 위에 1~0 줄", s.numberRow) { update(s.copy(numberRow = it)) }
             Toggle("자동 오타 수정", "스페이스를 누를 때 확실한 오타만 고쳐요", s.autoCorrect) { update(s.copy(autoCorrect = it)) }
             Toggle("추천 낱말", "키보드 위에 고칠 말·이어질 말을 보여 줘요", s.suggestions) { update(s.copy(suggestions = it)) }
@@ -282,51 +297,72 @@ private fun CalibrationScreen(onDone: () -> Unit) {
     val layout = remember { KeyboardLayout.letters(settings.numberRow) }
     val cal = remember { Calibration(FitKeyStore.touch, layout) }
     var version by remember { mutableIntStateOf(0) }
-    var flash by remember { mutableStateOf(false) }
+    var justDone by remember { mutableStateOf(false) }
     val before = remember { FitKeyStore.touch.samples }
+    val bump = { version++ }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(20.dp)) {
             Text("내 손에 맞추기", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-            Text("평소처럼 편하게 쳐 주세요. 빨리 칠 필요도, 정확히 누르려고 애쓸 필요도 없어요. 평소 습관 그대로가 좋아요.",
+            Text("아래 문장을 평소처럼 쳐 주세요. 틀리면 지우고 고쳐도 되고, 오타가 남아 있어도 ‘다음 문장’을 누르면 돼요. 일부러 정확히 누르려고 애쓰지 않는 게 좋아요.",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp)
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(18.dp))
             version.let { }
             if (!cal.done) {
                 val sent = cal.current!!
-                Text("${cal.sentence + 1} / ${cal.sentences.size} · ${cal.doneKeys}/${cal.totalKeys}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(8.dp))
-                val typed = cal.typedChars
+                Text("문장 ${cal.sentence + 1} / ${cal.sentences.size}" + if (justDone) "  ✓ 앞 문장 배웠어요" else "", fontSize = 12.5.sp,
+                    color = if (justDone) MainActivity.GOOD else MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(6.dp))
+                Text(sent.text, fontSize = 22.sp, lineHeight = 31.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(12.dp))
+                // 친 글 (입력칸처럼)
+                val typed = cal.typedText()
+                Box(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)).padding(horizontal = 14.dp, vertical = 12.dp),
+                ) {
+                    Text(
+                        buildAnnotatedString {
+                            withStyle(SpanStyle(color = if (cal.onTrack) MaterialTheme.colorScheme.onSurface else MainActivity.ORANGE)) { append(typed) }
+                            withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) { append("|") }
+                        },
+                        fontSize = 20.sp, lineHeight = 28.sp,
+                    )
+                }
                 Text(
-                    buildAnnotatedString {
-                        withStyle(SpanStyle(color = MainActivity.GOOD)) { append(sent.text.take(typed)) }
-                        withStyle(SpanStyle(color = MainActivity.ORANGE, fontWeight = FontWeight.Bold)) { append(sent.text.drop(typed).take(1)) }
-                        append(sent.text.drop(typed + 1))
+                    when {
+                        typed.isEmpty() -> "여기에 친 글이 나와요. 다음에 칠 글쇠는 주황 테두리로 보여 줘요."
+                        !cal.onTrack -> "문장과 달라요. 지우고 고치거나, 그대로 두고 계속 쳐도 괜찮아요."
+                        else -> "좋아요, 계속 쳐 주세요."
                     },
-                    fontSize = 24.sp, lineHeight = 34.sp, fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.5.sp, color = if (!cal.onTrack) MainActivity.ORANGE else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
                 )
-                Spacer(Modifier.height(10.dp))
-                val nt = cal.next
-                Text(
-                    if (nt?.key == ' ') "다음: 스페이스" else "다음: 주황 테두리 글쇠" + if (nt != null && nt.key.isUpperCase()) " (쌍자음은 Shift 없이 그 글쇠만)" else "",
-                    fontSize = 13.sp, color = if (flash) MainActivity.ORANGE else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { cal.next(); justDone = true; bump() }, enabled = cal.enough) { Text("다음 문장 →") }
+                    OutlinedButton(onClick = { cal.skip(); justDone = false; bump() }) { Text("건너뛰기") }
+                }
             } else {
                 val n = cal.samples.size
                 val afterMiss = remember(cal.samples.size) { cal.missesAfter() }
                 Text("다 됐어요 👍", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
-                Text("글쇠 ${n}번 중 화면의 글쇠를 벗어난 터치: ${cal.misses}번 (${pct(cal.misses, n)}%)", fontSize = 14.sp)
-                Text("배운 습관으로 다시 판정하면: ${afterMiss}번 (${pct(afterMiss, n)}%)", fontSize = 14.sp, color = MainActivity.GOOD, fontWeight = FontWeight.Bold)
+                if (n == 0) {
+                    Text("배울 터치가 없었어요. 문장을 쳐 본 뒤 ‘다음 문장’을 눌러 주세요.", fontSize = 14.sp)
+                } else {
+                    Text("글쇠 ${n}번 중 화면의 글쇠를 벗어난 터치: ${cal.misses}번 (${pct(cal.misses, n)}%)", fontSize = 14.sp)
+                    Text("배운 습관으로 다시 판정하면: ${afterMiss}번 (${pct(afterMiss, n)}%)", fontSize = 14.sp, color = MainActivity.GOOD, fontWeight = FontWeight.Bold)
+                }
                 val spread = FitKeyStore.touch.averageSpread()
-                if (spread > 0.4f && settings.height < 1.2f) {
-                    Text("손가락 터치가 넓게 흩어지는 편이에요. 설정에서 키보드 높이를 조금 키우면 더 정확해져요.",
+                if (n > 0 && spread > 0.4f && settings.height < 1.2f) {
+                    Text("손가락 터치가 넓게 흩어지는 편이에요. ‘키보드 크기·위치’에서 높이를 조금 키우면 더 정확해져요.",
                         fontSize = 13.sp, color = MainActivity.ORANGE, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp))
                 }
                 Text("아래 키보드의 주황 선은 글쇠마다 실제로 누르는 쪽이에요. 앞으로 이 쪽을 그 글쇠로 알아들어요. 쓰면서도 계속 배워요.",
                     fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp, modifier = Modifier.padding(top = 8.dp))
                 Spacer(Modifier.height(14.dp))
-                Button(onClick = { FitKeyStore.save(); FitKeyStore.markCalibrated(c); onDone() }, colors = ButtonDefaults.buttonColors()) { Text("저장하고 돌아가기") }
+                Button(onClick = { FitKeyStore.save(); if (n > 0) FitKeyStore.markCalibrated(c); onDone() }) { Text("저장하고 돌아가기") }
                 Text("(터치 ${FitKeyStore.touch.samples - before}번을 새로 배웠어요)", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
             }
         }
@@ -334,17 +370,17 @@ private fun CalibrationScreen(onDone: () -> Unit) {
             factory = { ctx ->
                 KeyboardView(ctx).apply {
                     this.layout = layout
-                    heightScale = settings.height
-                    vibrate = settings.vibrate
-                    stripHint = "보정 중: 표시된 문장을 쳐 주세요"
+                    io.github.poohcjs.fitkey.ime.FitKeyService.applyLook(this, settings)
+                    stripHint = "보정 중 · 위 문장을 쳐 주세요"
                     onAspect = { FitKeyStore.touch.aspect = it }
                     listener = object : KeyboardView.Listener {
                         override fun onKey(key: Key, ux: Float, uy: Float) {
-                            val ok = cal.tap(key, ux, uy)
-                            flash = !ok
-                            version++
+                            val moved = cal.press(key, ux, uy)
+                            if (moved) justDone = true else if (key.kind == io.github.poohcjs.fitkey.engine.KeyKind.LETTER) justDone = false
+                            bump()
                             refreshCalibrationView(this@apply, cal)
                         }
+                        override fun onBackspace() { cal.backspace(); bump(); refreshCalibrationView(this@apply, cal) }
                     }
                     refreshCalibrationView(this, cal)
                 }
@@ -364,10 +400,71 @@ private fun refreshCalibrationView(v: KeyboardView, cal: Calibration) {
         return
     }
     val sent = cal.current ?: return
-    val t = cal.next
     v.lang = sent.lang
-    v.shift = if (t != null && t.key.isUpperCase()) ShiftState.ONCE else ShiftState.OFF
-    v.target = t?.key?.takeIf { it != ' ' }?.lowercaseChar()
+    v.shift = if (cal.shift) ShiftState.ONCE else ShiftState.OFF
+    v.target = cal.nextKey()?.takeIf { it != ' ' }?.lowercaseChar()
+}
+
+/** 키보드 크기·위치: 바로 보면서 조절 */
+@Composable
+private fun SizeScreen(onDone: () -> Unit) {
+    val c = LocalContext.current
+    var s by remember { mutableStateOf(FitKeyStore.settings(c)) }
+    fun update(n: KeySettings) { s = n; FitKeyStore.saveSettings(c, n) }
+    val layout = remember(s.numberRow) { KeyboardLayout.letters(s.numberRow) }
+
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(20.dp)) {
+            Text("키보드 크기·위치", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+            Text("아래 미리보기를 보면서 맞춰 주세요. 바꾸면 바로 키보드에 적용돼요. 글쇠가 클수록 덜 틀려요.",
+                fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp)
+            Spacer(Modifier.height(14.dp))
+            Text("빠른 선택", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Preset("기본") { update(s.copy(height = 1f, width = 1f, align = 0f, bottomGap = 0)) }
+                Preset("크게") { update(s.copy(height = 1.2f, width = 1f, align = 0f)) }
+                Preset("한 손 ←") { update(s.copy(width = 0.78f, align = -1f)) }
+                Preset("한 손 →") { update(s.copy(width = 0.78f, align = 1f)) }
+            }
+            Spacer(Modifier.height(14.dp))
+            Text("높이 ${(s.height * 100).toInt()}%", fontSize = 14.sp)
+            Slider(s.height, { update(s.copy(height = Math.round(it * 20) / 20f)) }, valueRange = 0.8f..1.4f, steps = 11)
+            Text("너비 ${(s.width * 100).toInt()}%" + if (s.width < 0.95f) " (한 손 모드: 빈 쪽을 누르면 그쪽으로 옮겨져요)" else "", fontSize = 14.sp)
+            Slider(s.width, { update(s.copy(width = Math.round(it * 20) / 20f)) }, valueRange = 0.6f..1.0f, steps = 7)
+            if (s.width < 0.98f) {
+                Text("좌우 위치: " + if (s.align < -0.3f) "왼쪽" else if (s.align > 0.3f) "오른쪽" else "가운데", fontSize = 14.sp)
+                Slider(s.align, { update(s.copy(align = Math.round(it * 4) / 4f)) }, valueRange = -1f..1f, steps = 7)
+            }
+            Text("아래 여백 ${s.bottomGap}dp (키보드를 위로 올리기)", fontSize = 14.sp)
+            Slider(s.bottomGap.toFloat(), { update(s.copy(bottomGap = (Math.round(it / 4f) * 4))) }, valueRange = 0f..80f, steps = 19)
+            Toggle("숫자 줄 보이기", "맨 위에 1~0 줄", s.numberRow) { update(s.copy(numberRow = it)) }
+            Spacer(Modifier.height(10.dp))
+            Text("크기를 크게 바꿨다면 ‘내 손에 맞추기’를 한 번 더 하면 좋아요 (배운 습관은 글쇠 크기에 맞춰 그대로 쓰지만, 다시 재면 더 정확해요).",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp)
+            Spacer(Modifier.height(10.dp))
+            Button(onClick = onDone) { Text("완료") }
+        }
+        Text("미리보기", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 20.dp, bottom = 4.dp))
+        AndroidView(
+            factory = { ctx -> KeyboardView(ctx).apply { this.layout = layout; stripHint = "미리보기" } },
+            update = { v ->
+                if (v.layout !== layout) v.layout = layout
+                io.github.poohcjs.fitkey.ime.FitKeyService.applyLook(v, s)
+                v.vibrate = false
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun Preset(label: String, onClick: () -> Unit) {
+    Text(
+        label, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp),
+    )
 }
 
 private fun pct(a: Int, n: Int) = if (n == 0) 0 else Math.round(a * 1000f / n) / 10f

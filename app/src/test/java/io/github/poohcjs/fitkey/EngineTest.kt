@@ -123,23 +123,57 @@ class EngineTest {
         assertEquals('r', touch.hit(layout, r.cx, r.cy)!!.letter)
     }
 
+    /** 보정 화면에서 문장 하나를 친다: 노린 글쇠 가운데 + 치우침 자리를 누르고, 화면에서 그 자리의 글쇠가 눌린다 */
+    private fun Calibration.typeSentence(bias: Pair<Float, Float>, skipIndex: Int = -1, extraAt: Int = -1) {
+        val keys = targetKeys(current!!)
+        keys.forEachIndexed { i, c ->
+            if (i == skipIndex) return@forEachIndexed
+            if (i == extraAt) { val z = layout.keyOf('z')!!; press(z, z.cx, z.cy) }
+            if (c == ' ') { press(layout.keys.first { it.id == "space" }, 5f, 3.5f); return@forEachIndexed }
+            val k = layout.keyOf(c)!!
+            val x = k.cx + bias.first
+            val y = k.cy + bias.second
+            press(layout.keyAt(x, y)!!, x, y)
+        }
+        if (current != null && typed.isNotEmpty()) next()
+    }
+
     @Test fun calibrationLearnsSystematicBias() {
         val touch = TouchModel()
         val cal = Calibration(touch, layout)
-        // 늘 글쇠 가운데보다 오른쪽으로 0.55칸(옆 글쇠에 걸침), 아래로 0.2줄 누르는 사람
-        while (!cal.done) {
-            val t = cal.next!!
-            if (t.key == ' ') { cal.tap(layout.keys.first { it.id == "space" }, 5f, 3.5f); continue }
-            val k = layout.keyOf(t.key)!!
-            cal.tap(k, k.cx + 0.55f, k.cy + 0.2f)
-        }
-        assertTrue(cal.samples.size > 80)
+        // 늘 글쇠 가운데보다 오른쪽으로 0.55칸(옆 글쇠에 걸침), 아래로 0.2줄 누르는 사람. 한 글자 빼먹고, 엉뚱한 글쇠 하나 더 치기도 한다
+        while (!cal.done) cal.typeSentence(0.55f to 0.2f, skipIndex = 3, extraAt = 6)
+        assertTrue(cal.samples.size > 100)
         val before = cal.misses
         val after = cal.missesAfter()
-        assertTrue("보정 전 $before → 후 $after", after < before)
-        assertNotEquals(0, before)
+        assertTrue("보정 전 $before → 후 $after", after < before / 3)
         val (ox, oy) = touch.offset('k')
         assertTrue("$ox $oy", ox > 0.3f && oy > 0.1f)
+    }
+
+    @Test fun calibrationShowsTypedTextAndUsesCorrectedTaps() {
+        val touch = TouchModel()
+        val cal = Calibration(touch, layout)
+        val e = layout.keyOf('e')!!
+        val w = layout.keyOf('w')!!
+        // '다'의 ㄷ(e)을 치려다 ㅈ(w) 오른쪽 끝을 누름 → 지우고 ㄷ을 다시 침
+        cal.press(w, w.cx + 0.45f, w.cy)
+        cal.backspace()
+        cal.press(e, e.cx, e.cy)
+        cal.press(layout.keyOf('k')!!, layout.keyOf('k')!!.cx, layout.keyOf('k')!!.cy)
+        assertEquals("다", cal.typedText())
+        assertTrue(cal.onTrack)
+        assertEquals('f', cal.nextKey())   // 다음: '람'의 ㄹ
+        // 문장 끝까지 정확히 치면 저절로 다음 문장으로
+        val rest = cal.targetKeys(cal.current!!).drop(2)
+        rest.forEach { c ->
+            if (c == ' ') cal.press(layout.keys.first { it.id == "space" }, 5f, 3.5f)
+            else layout.keyOf(c)!!.let { cal.press(it, it.cx, it.cy) }
+        }
+        assertEquals(1, cal.sentence)
+        // 지웠던 터치(w 오른쪽 끝)도 'ㄷ' 자료로 배웠다
+        assertTrue(cal.samples.any { it.key.letter == 'e' && it.ux < e.cx - 0.4f })
+        assertEquals(1, cal.misses)
     }
 
     @Test fun secretFieldsNeverLearnOrSuggest() {
