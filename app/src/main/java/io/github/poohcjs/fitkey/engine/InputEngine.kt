@@ -84,7 +84,7 @@ class InputEngine(
         resetWord()
         field = info
         if (!keepLang && startLang != null) lang = startLang
-        mode = if (info.numeric) Mode.SYMBOLS else Mode.LETTERS
+        mode = if (info.numeric) Mode.NUMPAD else Mode.LETTERS
         shift = ShiftState.OFF
         lastCorrection = null
         pendingLearn = null
@@ -174,7 +174,8 @@ class InputEngine(
 
     // ── 스페이스·문장부호·엔터 ─────────────────────────────
     fun onSpace() {
-        if (mode != Mode.LETTERS) { mode = Mode.LETTERS; onStateChanged() }
+        // 기호 화면은 띄어 쓰면 글자로 돌아가고, 숫자 패드는 그대로 둔다
+        if (mode == Mode.SYMBOLS || mode == Mode.SYMBOLS2) { mode = Mode.LETTERS; onStateChanged() }
         finishWord(" ", correct = true)
         refreshAutoCap()
         onStateChanged()
@@ -286,6 +287,13 @@ class InputEngine(
         shift = ShiftState.OFF
         refreshAutoCap()
         updateSuggestions()
+        onStateChanged()
+    }
+
+    /** 숫자 패드 열고 닫기 */
+    fun onNumpad() {
+        finishWord("", correct = false)
+        mode = if (mode == Mode.NUMPAD) Mode.LETTERS else Mode.NUMPAD
         onStateChanged()
     }
 

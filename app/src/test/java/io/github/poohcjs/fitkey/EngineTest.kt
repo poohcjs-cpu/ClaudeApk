@@ -186,4 +186,25 @@ class EngineTest {
         assertTrue(e.suggestions.items.isEmpty())
         assertEquals(0, user.size)
     }
+
+    @Test fun numpadKeyAndLayout() {
+        // 아래 줄 세 번째 글쇠는 123(숫자 패드), 스페이스바 밀기를 끄면 한/A
+        assertTrue(KeyboardLayout.letters(true).keys.any { it.id == "numpad" })
+        assertTrue(KeyboardLayout.letters(true, numpadKey = false).keys.any { it.id == "lang" })
+        val pad = KeyboardLayout.numpad(5)
+        assertEquals(5, pad.rows)                                   // 글자 키보드와 같은 높이
+        assertEquals("5", pad.keyAt(3.7f, 1.9f)!!.text)               // 가운데 줄 가운데 = 5
+        assertEquals("0", pad.keyAt(3.7f, 4.4f)!!.text)
+        val (e, s) = engine()
+        e.type("rk")
+        e.onNumpad()
+        assertEquals(io.github.poohcjs.fitkey.engine.Mode.NUMPAD, e.mode)
+        e.onText("1"); e.onText("2"); e.onSpace(); e.onText("3")
+        assertEquals("가12 3", s.text)
+        assertEquals(io.github.poohcjs.fitkey.engine.Mode.NUMPAD, e.mode) // 띄어 써도 숫자 패드 그대로
+        e.onMode()
+        assertEquals(io.github.poohcjs.fitkey.engine.Mode.LETTERS, e.mode)
+        e.startInput(FieldInfo(numeric = true))
+        assertEquals(io.github.poohcjs.fitkey.engine.Mode.NUMPAD, e.mode)   // 숫자 칸은 숫자 패드로 시작
+    }
 }

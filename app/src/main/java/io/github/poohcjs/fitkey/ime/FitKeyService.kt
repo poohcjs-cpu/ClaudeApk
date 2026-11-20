@@ -25,6 +25,7 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
     private var view: KeyboardView? = null
     private var settings = KeySettings()
     private var letters = KeyboardLayout.letters(true)
+    private var numpad = KeyboardLayout.numpad(5)
     private var editor: EditorInfo? = null
 
     private val sink = object : TextSink {
@@ -81,9 +82,13 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
     private fun applySettings() {
         settings = FitKeyStore.settings(this)
         if (::engine.isInitialized) engine.settings = EngineSettings(settings.autoCorrect, settings.learn, settings.suggestions)
-        // 숫자 줄 설정이 바뀔 때만 새로 만든다 (글쇠 판정은 같은 배열 객체인지로 구분한다)
+        // 숫자 줄·한/A 글쇠 설정이 바뀔 때만 새로 만든다 (글쇠 판정은 같은 배열 객체인지로 구분한다)
         val wantRows = if (settings.numberRow) 5 else 4
-        if (letters.rows != wantRows) letters = KeyboardLayout.letters(settings.numberRow)
+        val hasNumpadKey = letters.keys.any { it.kind == KeyKind.NUMPAD }
+        if (letters.rows != wantRows || hasNumpadKey != settings.spaceSwipeLang) {
+            letters = KeyboardLayout.letters(settings.numberRow, numpadKey = settings.spaceSwipeLang)
+        }
+        if (numpad.rows != wantRows) numpad = KeyboardLayout.numpad(wantRows)
         if (::engine.isInitialized) engine.layout = letters
         view?.let { applyLook(it, settings) }
         syncView()
@@ -157,6 +162,7 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
         val want = when (engine.mode) {
             Mode.LETTERS -> letters
             Mode.SYMBOLS -> SYM1
+            Mode.NUMPAD -> numpad
             Mode.SYMBOLS2 -> SYM2
         }
         if (v.layout !== want) v.layout = want
@@ -184,6 +190,7 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
             KeyKind.ENTER -> engine.onEnter()
             KeyKind.SHIFT -> engine.onShift()
             KeyKind.LANG -> { engine.onLang(); FitKeyStore.saveLang(this, engine.lang) }
+            KeyKind.NUMPAD -> engine.onNumpad()
             KeyKind.MODE -> engine.onMode()
             KeyKind.BACKSPACE -> Unit
         }
@@ -215,6 +222,7 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
     override fun onToolbar(action: String) {
         when (action) {
             "size" -> { engine.resetWord(finish = true); view?.adjusting = true }
+            "switch" -> onLangLongPress()
             "settings" -> startActivity(
                 android.content.Intent(this, io.github.poohcjs.fitkey.ui.MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
             )

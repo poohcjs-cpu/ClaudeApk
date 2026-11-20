@@ -75,6 +75,8 @@ class ScreenshotTest {
 
     @Test fun toolbarAndSwipeLabel() = save("11_toolbar", keyboard { toolbar = true })
 
+    @Test fun numpad() = save("13_numpad", keyboard { layout = KeyboardLayout.numpad(5); mode = Mode.NUMPAD; enterLabel = "완료" })
+
     @Test @Config(qualifiers = "w400dp-h880dp-night-xxhdpi")
     fun adjustModeDark() = save("12_adjust_dark", keyboard { adjusting = true; widthScale = 0.85f; align = 0.4f })
 

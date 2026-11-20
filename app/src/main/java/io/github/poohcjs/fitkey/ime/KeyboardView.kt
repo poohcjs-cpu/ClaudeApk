@@ -144,8 +144,8 @@ class KeyboardView(context: Context) : View(context) {
         val gapX = 2.5f * dp
         val gapY = 4f * dp
         out.set(
-            left + k.x * keyW + gapX, stripH + k.row * rowH + gapY,
-            left + (k.x + k.w) * keyW - gapX, stripH + (k.row + 1) * rowH - gapY + 1,
+            left + k.x * keyW + gapX, stripH + k.y * rowH + gapY,
+            left + (k.x + k.w) * keyW - gapX, stripH + (k.y + k.h) * rowH - gapY + 1,
         )
     }
 
@@ -170,13 +170,17 @@ class KeyboardView(context: Context) : View(context) {
         val label = labelOf(k)
         text.color = if (k.kind == KeyKind.ENTER) Color.WHITE else ink
         text.typeface = if (k.kind == KeyKind.LETTER) Typeface.DEFAULT else Typeface.DEFAULT_BOLD
-        text.textSize = when (k.kind) {
+        text.textSize = when {
+            mode == Mode.NUMPAD && k.kind in setOf(KeyKind.DIGIT, KeyKind.SYMBOL, KeyKind.PERIOD) -> 27 * sp
+            mode == Mode.NUMPAD && k.kind == KeyKind.SPACE -> 24 * sp
+            else -> null
+        } ?: when (k.kind) {
             KeyKind.LETTER -> if (lang == Lang.KO) 21 * sp else 22 * sp
             KeyKind.DIGIT, KeyKind.SYMBOL, KeyKind.COMMA, KeyKind.PERIOD -> 19 * sp
             KeyKind.SPACE -> 13 * sp
             else -> if (label.length > 2) 13.5f * sp else 17 * sp
         } * heightScale.coerceIn(0.9f, 1.15f)
-        if (k.kind == KeyKind.SPACE) text.color = sub
+        if (k.kind == KeyKind.SPACE && mode != Mode.NUMPAD) text.color = sub
         // 좁은 글쇠(한 손 모드 등)에서는 글자가 넘치지 않게 줄인다
         val maxW = rect.width() * 0.86f
         val w = text.measureText(label)
@@ -201,9 +205,10 @@ class KeyboardView(context: Context) : View(context) {
         }
         KeyKind.SHIFT -> if (mode == Mode.LETTERS) (if (shift == ShiftState.LOCK) "⇪" else "⇧") else k.text ?: "1/2"
         KeyKind.BACKSPACE -> "⌫"
-        KeyKind.SPACE -> (if (lang == Lang.KO) "한국어" else "English").let { if (spaceSwipeLang) "◂ $it ▸" else it }
+        KeyKind.SPACE -> if (mode == Mode.NUMPAD) "␣" else (if (lang == Lang.KO) "한국어" else "English").let { if (spaceSwipeLang) "◂ $it ▸" else it }
         KeyKind.ENTER -> enterLabel
         KeyKind.LANG -> if (lang == Lang.KO) "한/A" else "A/한"
+        KeyKind.NUMPAD -> "123"
         KeyKind.MODE -> if (mode == Mode.LETTERS) "!#1" else if (lang == Lang.KO) "가나다" else "ABC"
         else -> k.text ?: ""
     }
@@ -221,8 +226,9 @@ class KeyboardView(context: Context) : View(context) {
                 text.textSize = 13 * sp; text.color = sub
                 c.drawText(stripHint, width / 2f, stripH / 2 - (text.descent() + text.ascent()) / 2, text)
             } else if (toolbar) {
-                drawToolButton(c, width * 0.25f, "⤢  크기·위치")
-                drawToolButton(c, width * 0.75f, "⚙  설정")
+                drawToolButton(c, width / 6f, "⤢ 크기·위치")
+                drawToolButton(c, width / 2f, "⌨ 키보드")
+                drawToolButton(c, width * 5f / 6f, "⚙ 설정")
             }
             return
         }
@@ -480,7 +486,7 @@ class KeyboardView(context: Context) : View(context) {
             listener?.onBackspace()
             timers.removeCallbacks(repeatDelete)
             timers.postDelayed(repeatDelete, 420)
-        } else if (key.longPress != null || key.kind == KeyKind.LANG || key.kind == KeyKind.SPACE) {
+        } else if (key.longPress != null || key.kind == KeyKind.LANG || key.kind == KeyKind.NUMPAD || key.kind == KeyKind.SPACE) {
             timers.postDelayed(longPress, if (key.kind == KeyKind.SPACE) 350L else 380L)
         }
         invalidate()
@@ -510,7 +516,9 @@ class KeyboardView(context: Context) : View(context) {
         if (id == stripDown) {
             stripDown = -1
             if (y < stripH && suggestions.items.isNotEmpty()) listener?.onSuggestion((x / (width / 3f)).toInt().coerceIn(0, suggestions.items.lastIndex))
-            else if (y < stripH && toolbar && stripHint.isEmpty()) listener?.onToolbar(if (x < width / 2f) "size" else "settings")
+            else if (y < stripH && toolbar && stripHint.isEmpty()) listener?.onToolbar(
+                when { x < width / 3f -> "size"; x < width * 2f / 3f -> "switch"; else -> "settings" },
+            )
             return
         }
         val p = ptrs.remove(id) ?: return
@@ -529,7 +537,7 @@ class KeyboardView(context: Context) : View(context) {
                 if (!p.swiped) { p.cursorMode = true; buzz() }
                 return
             }
-            p.key.kind == KeyKind.LANG -> { p.longFired = true; listener?.onLangLongPress() }
+            p.key.kind == KeyKind.LANG || p.key.kind == KeyKind.NUMPAD -> { p.longFired = true; listener?.onLangLongPress() }
             p.key.longPress != null && mode == Mode.LETTERS || p.key.kind == KeyKind.COMMA || p.key.kind == KeyKind.PERIOD -> {
                 p.longFired = true
                 buzz()

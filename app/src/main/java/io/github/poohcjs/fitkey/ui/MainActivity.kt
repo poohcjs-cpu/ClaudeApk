@@ -232,7 +232,7 @@ private fun HomeScreen(tick: Int, onSize: () -> Unit, onCalibrate: () -> Unit) {
             }
             Spacer(Modifier.height(6.dp))
             Toggle("숫자 줄 보이기", "맨 위에 1~0 줄", s.numberRow) { update(s.copy(numberRow = it)) }
-            Toggle("스페이스바 밀어서 한/영 전환", "끄면 밀어서 커서 이동 (켜져 있을 때는 스페이스바를 길게 누른 뒤 밀면 커서 이동)", s.spaceSwipeLang) { update(s.copy(spaceSwipeLang = it)) }
+            Toggle("스페이스바 밀어서 한/영 전환", "끄면 밀어서 커서 이동, 123 글쇠 자리에 한/A 글쇠가 다시 나와요", s.spaceSwipeLang) { update(s.copy(spaceSwipeLang = it)) }
             Toggle("자동 오타 수정", "스페이스를 누를 때 확실한 오타만 고쳐요", s.autoCorrect) { update(s.copy(autoCorrect = it)) }
             Toggle("추천 낱말", "키보드 위에 고칠 말·이어질 말을 보여 줘요", s.suggestions) { update(s.copy(suggestions = it)) }
             Toggle("쓰면서 배우기", "지우고 다시 친 글쇠, 고친 오타로 손 습관을 계속 배워요", s.learn) { update(s.copy(learn = it)) }
@@ -251,7 +251,7 @@ private fun HomeScreen(tick: Int, onSize: () -> Unit, onCalibrate: () -> Unit) {
 
         Spacer(Modifier.height(14.dp))
         Text(
-            "한/A 글쇠를 길게 누르면 다른 키보드(삼성 키보드 등)로 바로 바꿀 수 있어요. 스페이스를 누른 채 옆으로 밀면 커서가 움직여요.\n\n" +
+            "한/영 전환: 스페이스바를 옆으로 밀기 · 숫자 패드: 123 글쇠 · 다른 키보드(삼성 키보드 등)로 바꾸기: 123 글쇠를 길게 누르거나 키보드 맨 위 ‘⌨ 키보드’ · 커서 이동: 스페이스바를 길게 누른 뒤 밀기\n\n" +
                 "사전: FrequencyWords (OpenSubtitles 2018, Hermit Dave) · CC BY-SA 4.0",
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp,
         )
