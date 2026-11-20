@@ -85,7 +85,16 @@ class MainActivity : ComponentActivity() {
 
     // 키보드 켜기·고르기 화면에서 돌아오면 상태를 다시 본다
     override fun onResume() { super.onResume(); tick.intValue++ }
-    override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) tick.intValue++ }
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) return
+        tick.intValue++
+        // 1단계(켜기)를 하고 돌아오면, 2단계 '키보드 고르기' 목록을 바로 띄운다 (따로 찾지 않아도 되게)
+        if (pickerAfterSettings && isEnabled(this) && !isSelected(this)) {
+            pickerAfterSettings = false
+            window.decorView.postDelayed({ if (hasWindowFocus()) showPicker(this) }, 450)
+        }
+    }
     override fun onPause() { FitKeyStore.save(); super.onPause() }
 
     companion object {
@@ -99,6 +108,23 @@ class MainActivity : ComponentActivity() {
 
         fun isSelected(c: Context): Boolean =
             Settings.Secure.getString(c.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)?.startsWith(c.packageName + "/") == true
+
+        /** 지금 쓰는 키보드 이름 (예: 삼성 키보드) */
+        fun currentKeyboard(c: Context): String {
+            val id = Settings.Secure.getString(c.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD) ?: return "알 수 없음"
+            val imm = c.getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+            return imm.inputMethodList.firstOrNull { it.id == id }?.loadLabel(c.packageManager)?.toString() ?: id.substringBefore('/')
+        }
+
+        /** 1단계 화면에서 돌아오면 고르기 목록을 바로 띄울지 */
+        var pickerAfterSettings = false
+
+        fun openKeyboardSettings(c: Context) {
+            pickerAfterSettings = true
+            c.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+
+        fun showPicker(c: Context) = (c.getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
     }
 }
 
@@ -133,14 +159,38 @@ private fun HomeScreen(tick: Int, onCalibrate: () -> Unit) {
 
         Card {
             Text("처음 한 번만 설정해 주세요", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            Text("안드로이드 보안 규칙상 키보드는 설치만으로 바뀌지 않아요. 아래 두 단계를 누르면 돼요.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("안드로이드 보안 규칙상 키보드는 설치만으로 바뀌지 않아요. 1 → 2 순서로 눌러 주세요.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "지금 쓰는 키보드: ${remember(tick) { MainActivity.currentKeyboard(c) }}",
+                fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = if (selected) MainActivity.GOOD else MaterialTheme.colorScheme.onSurface,
+            )
             Spacer(Modifier.height(12.dp))
-            Step(1, "키보드 켜기", if (enabled) "켜져 있어요" else "목록에서 ‘핏키보드’를 켜 주세요 (보안 안내가 나오면 확인)", enabled) {
-                c.startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }
+            Step(
+                1, "키보드 켜기",
+                if (enabled) "켜져 있어요" else "‘키보드 목록 및 기본값’ 화면이 열려요. 아래쪽 키보드 목록에서 ‘핏키보드 (내 손에 맞춤)’ 오른쪽 스위치를 켜고, 안내 창이 나오면 ‘확인’을 누른 뒤 뒤로 돌아오세요.",
+                enabled,
+            ) { MainActivity.openKeyboardSettings(c) }
             Spacer(Modifier.height(8.dp))
-            Step(2, "기본 키보드로 고르기", if (selected) "지금 핏키보드를 쓰고 있어요" else "나오는 목록에서 ‘핏키보드’를 고르세요", selected, enabledStep = enabled) {
-                (c.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
+            Step(
+                2, "기본 키보드로 고르기",
+                when {
+                    selected -> "지금 핏키보드를 쓰고 있어요"
+                    !enabled -> "1단계를 먼저 해 주세요 (켜지 않은 키보드는 목록에 안 나와요)"
+                    else -> "‘키보드 선택’ 창이 떠요. 그 안에서 ‘핏키보드 (내 손에 맞춤)’ 글자를 한 번 누르면 끝이에요."
+                },
+                selected,
+            ) {
+                if (!enabled) {
+                    android.widget.Toast.makeText(c, "먼저 1단계: 목록에서 핏키보드를 켜 주세요", android.widget.Toast.LENGTH_LONG).show()
+                    MainActivity.openKeyboardSettings(c)
+                } else MainActivity.showPicker(c)
+            }
+            if (enabled && !selected) {
+                Text(
+                    "‘키보드 선택’ 창이 안 뜨면: 1단계 버튼을 다시 눌러 열린 화면 맨 위 ‘기본 키보드’를 누르고 ‘핏키보드’를 고르세요.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp, modifier = Modifier.padding(top = 6.dp, start = 4.dp),
+                )
             }
             Spacer(Modifier.height(8.dp))
             Step(3, "내 손에 맞추기 (터치 보정)", if (calibrated > 0) "${calibrated}번 했어요 · 쓸수록 계속 배워요" else "문장 3개를 쳐 보면 손 습관을 재요 (2분)", calibrated > 0, enabledStep = true, onClick = onCalibrate)
