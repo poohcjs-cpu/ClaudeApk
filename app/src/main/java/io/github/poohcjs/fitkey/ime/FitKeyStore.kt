@@ -77,6 +77,12 @@ object FitKeyStore {
     }
 
     fun saveSettings(c: Context, s: KeySettings) {
+        // 키보드 크기가 바뀌면 배운 손 습관을 새 크기로 환산한다 (손가락이 빗나가는 실제 거리는 그대로라서)
+        val old = settings(c)
+        if (old.width != s.width || old.height != s.height) {
+            touch.rescale(old.width / s.width, old.height / s.height)
+            save()
+        }
         prefs(c).edit().putFloat("height", s.height).putBoolean("numberRow", s.numberRow).putBoolean("vibrate", s.vibrate)
             .putBoolean("autoCorrect", s.autoCorrect).putBoolean("suggestions", s.suggestions).putBoolean("learn", s.learn)
             .putFloat("width", s.width).putFloat("align", s.align).putInt("bottomGap", s.bottomGap)

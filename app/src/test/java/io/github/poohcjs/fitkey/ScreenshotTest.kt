@@ -76,7 +76,10 @@ class ScreenshotTest {
     @Test @Config(qualifiers = "w400dp-h880dp-night-xxhdpi")
     fun calibrationDark() = activityShot("9_calibrate_dark", "calibrate")
 
-    @Test fun toolbarAndSwipeLabel() = save("11_toolbar", keyboard { toolbar = true })
+    @Test fun toolbarAndSwipeLabel() = save("11_toolbar", keyboard { toolbar = true; clip = "부산 해운대구 우동 1234-5 해운대아파트 101동" })
+
+    @Test @Config(qualifiers = "w400dp-h880dp-night-xxhdpi")
+    fun otpBar() = save("14_otp", keyboard { toolbar = true; clip = "메모"; otp = "482915"; layout = KeyboardLayout.numpad(5); mode = Mode.NUMPAD })
 
     @Test fun numpad() = save("13_numpad", keyboard { layout = KeyboardLayout.numpad(5); mode = Mode.NUMPAD; enterLabel = "완료" })
 

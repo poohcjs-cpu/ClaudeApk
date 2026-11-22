@@ -138,7 +138,10 @@ private fun App(tick: Int, start: String = "home") {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background, contentColor = MaterialTheme.colorScheme.onBackground) {
         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
             when (screen) {
-                "calibrate" -> CalibrationScreen { screen = "home" }
+                "calibrate" -> {
+                    var round by remember { mutableIntStateOf(0) }
+                    androidx.compose.runtime.key(round) { CalibrationScreen(onRestart = { round++ }) { screen = "home" } }
+                }
                 "size" -> SizeScreen { screen = "home" }
                 else -> HomeScreen(tick, onSize = { screen = "size" }) { screen = "calibrate" }
             }
@@ -242,6 +245,34 @@ private fun HomeScreen(tick: Int, onSize: () -> Unit, onCalibrate: () -> Unit) {
 
         Spacer(Modifier.height(14.dp))
         Card {
+            Text("인증번호 자동 표시", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            val otpOn = remember(tick) { androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(c).contains(c.packageName) }
+            Text(
+                if (otpOn) "켜져 있어요 · 문자나 카카오 알림톡으로 인증번호가 오면 키보드 맨 위에 ‘🔑 인증번호’가 떠요 (5분 동안, 누르면 입력)"
+                else "문자·카카오 알림톡·은행 앱 알림으로 온 인증번호를 키보드 맨 위에 띄워, 한 번 눌러 넣을 수 있어요. 핏키보드에 ‘알림 접근’을 허용해야 해요.",
+                fontSize = 13.sp, color = if (otpOn) MainActivity.GOOD else MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 18.sp,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Text("알림에서 인증번호 숫자만 꺼내 5분 동안 기억해요. 알림 글은 저장하지 않고, 인터넷 권한이 없어 어디로도 보내지 않아요.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
+            if (!otpOn) {
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = {
+                    val cn = android.content.ComponentName(c, io.github.poohcjs.fitkey.ime.OtpListener::class.java).flattenToString()
+                    val detail = Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, cn)
+                    runCatching { c.startActivity(detail.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        .onFailure { c.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }) { Text("알림 접근 허용하기") }
+                Text("‘제한된 설정’이라 허용할 수 없다고 나오면: ‘앱 정보 열기’ → 오른쪽 위 ⋮ → ‘제한된 설정 허용’을 누른 뒤 다시 해 주세요. (스토어 밖에서 설치한 앱에 안드로이드가 거는 안전장치예요)",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp, modifier = Modifier.padding(top = 6.dp))
+                OutlinedButton(onClick = {
+                    c.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + c.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }) { Text("앱 정보 열기") }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+        Card {
             Text("배운 것", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             Text("터치 ${learned.first}번 · 내 낱말 ${learned.second}개", fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
             Text("모두 이 휴대폰에만 저장돼요. 이 앱은 인터넷 권한이 없어 입력한 글을 밖으로 보낼 수 없고, 비밀번호 칸에서는 아무것도 배우거나 기억하지 않아요.",
@@ -252,7 +283,7 @@ private fun HomeScreen(tick: Int, onSize: () -> Unit, onCalibrate: () -> Unit) {
 
         Spacer(Modifier.height(14.dp))
         Text(
-            "한/영 전환: 스페이스바를 옆으로 밀기 · 숫자 패드: 123 글쇠 · 다른 키보드(삼성 키보드 등)로 바꾸기: 123 글쇠를 길게 누르거나 키보드 맨 위 ‘⌨ 키보드’ · 커서 이동: 스페이스바를 길게 누른 뒤 밀기\n\n" +
+            "한/영 전환: 스페이스바를 옆으로 밀기 · 숫자 패드: 123 글쇠 · 다른 키보드(삼성 키보드 등)로 바꾸기: 123 글쇠를 길게 누르거나 화면 아래 키보드 아이콘 · 커서 이동: 스페이스바를 길게 누른 뒤 밀기 · 키보드 맨 위: 클립보드 최근 기록(누르면 붙여넣기), 인증번호, 설정\n\n" +
                 "사전: FrequencyWords (OpenSubtitles 2018, Hermit Dave) · CC BY-SA 4.0",
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp,
         )
@@ -297,15 +328,33 @@ private fun Toggle(title: String, desc: String?, on: Boolean, onChange: (Boolean
 }
 
 @Composable
-private fun CalibrationScreen(onDone: () -> Unit) {
+private fun CalibrationScreen(onRestart: () -> Unit = {}, onDone: () -> Unit) {
     val c = LocalContext.current
     val settings = remember { FitKeyStore.settings(c) }
+    // 보정 결과로 고른 크기·위치 (자동으로 적용하고, 되돌릴 수 있다)
+    var look by remember { mutableStateOf(settings) }
+    var advice by remember { mutableStateOf<io.github.poohcjs.fitkey.engine.SizeAdvisor.Advice?>(null) }
     val layout = remember { KeyboardLayout.letters(settings.numberRow) }
     val cal = remember { Calibration(FitKeyStore.touch, layout) }
     var version by remember { mutableIntStateOf(0) }
     var justDone by remember { mutableStateOf(false) }
     val before = remember { FitKeyStore.touch.samples }
     val bump = { version++ }
+    androidx.compose.runtime.LaunchedEffect(version) {
+        if (cal.done && advice == null && cal.samples.isNotEmpty()) {
+            val (sx, sy) = FitKeyStore.touch.averageSpreads() ?: return@LaunchedEffect
+            val a = io.github.poohcjs.fitkey.engine.SizeAdvisor.advise(
+                io.github.poohcjs.fitkey.engine.SizeAdvisor.Look(settings.height, settings.width, settings.align, settings.bottomGap),
+                sx, sy, cal.keyStats(), cal.letterRows,
+            )
+            advice = a
+            if (a.changed) {
+                val n = settings.copy(height = a.to.height, width = a.to.width, align = a.to.align, bottomGap = a.to.bottomGap)
+                FitKeyStore.saveSettings(c, n)
+                look = n
+            }
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(20.dp)) {
@@ -389,11 +438,12 @@ private fun CalibrationScreen(onDone: () -> Unit) {
                     Text("키보드 색: 초록 = 잘 맞음, 노랑 = 가끔 빗나감, 주황 = 자주 빗나감. 주황 선은 실제로 누르는 쪽이에요.",
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
                 }
-                val spread = FitKeyStore.touch.averageSpread()
-                if (n > 0 && spread > 0.4f && settings.height < 1.2f) {
-                    Text("손가락 터치가 넓게 흩어지는 편이에요. ‘키보드 크기·위치’에서 높이를 조금 키우면 더 정확해져요.",
-                        fontSize = 13.sp, color = MainActivity.ORANGE, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp))
-                }
+                advice?.let { a -> SizeAdviceCard(a, applied = look != settings, onUndo = {
+                    FitKeyStore.saveSettings(c, settings); look = settings
+                }, onApply = {
+                    val n = settings.copy(height = a.to.height, width = a.to.width, align = a.to.align, bottomGap = a.to.bottomGap)
+                    FitKeyStore.saveSettings(c, n); look = n
+                }, onRestart = { FitKeyStore.save(); onRestart() }) }
                 Text("아래 키보드의 주황 선은 글쇠마다 실제로 누르는 쪽이에요. 앞으로 이 쪽을 그 글쇠로 알아들어요. 쓰면서도 계속 배워요.",
                     fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp, modifier = Modifier.padding(top = 8.dp))
                 Spacer(Modifier.height(14.dp))
@@ -420,9 +470,47 @@ private fun CalibrationScreen(onDone: () -> Unit) {
                     refreshCalibrationView(this, cal)
                 }
             },
-            update = { v -> version.let { }; refreshCalibrationView(v, cal) },
+            update = { v ->
+                version.let { }
+                io.github.poohcjs.fitkey.ime.FitKeyService.applyLook(v, look)
+                refreshCalibrationView(v, cal)
+            },
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+/** 보정 결과로 맞춘 크기·위치 */
+@Composable
+private fun SizeAdviceCard(a: io.github.poohcjs.fitkey.engine.SizeAdvisor.Advice, applied: Boolean, onUndo: () -> Unit, onApply: () -> Unit, onRestart: () -> Unit) {
+    Spacer(Modifier.height(14.dp))
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)).padding(14.dp)) {
+        val now = Math.round(a.missNow * 1000) / 10f
+        val after = Math.round(a.missAfter * 1000) / 10f
+        if (!a.changed) {
+            Text("지금 크기·위치가 손에 잘 맞아요 👍", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text("흩어짐으로 계산한 빗나감 약 $now%", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            a.reasons.forEach { Text("· $it", fontSize = 13.sp, lineHeight = 18.sp) }
+            return@Column
+        }
+        Text(if (applied) "키보드 크기·위치를 손에 맞게 바꿨어요" else "추천 크기·위치", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Spacer(Modifier.height(4.dp))
+        a.reasons.forEach { Text("· $it", fontSize = 13.sp, lineHeight = 18.sp) }
+        Text(
+            "높이 ${Math.round(a.from.height * 100)}% → ${Math.round(a.to.height * 100)}% · 너비 ${Math.round(a.from.width * 100)}% → ${Math.round(a.to.width * 100)}%" +
+                (if (a.to.bottomGap != a.from.bottomGap) " · 아래 여백 ${a.from.bottomGap} → ${a.to.bottomGap}dp" else ""),
+            fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp),
+        )
+        if (a.missAfter < a.missNow) {
+            Text("예상 빗나감 $now% → $after%", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MainActivity.GOOD, modifier = Modifier.padding(top = 4.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (applied) OutlinedButton(onClick = onUndo) { Text("되돌리기") } else Button(onClick = onApply) { Text("추천대로 바꾸기") }
+            if (applied) Button(onClick = onRestart) { Text("바뀐 크기로 다시 재기") }
+        }
+        if (applied) Text("바뀐 크기에서 한 번 더 재면 습관을 더 정확히 배워요 (배운 습관은 새 크기에 맞게 이미 환산했어요).",
+            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp, modifier = Modifier.padding(top = 6.dp))
     }
 }
 

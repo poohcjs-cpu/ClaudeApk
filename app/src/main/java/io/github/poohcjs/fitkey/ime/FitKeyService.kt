@@ -45,6 +45,11 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
     }
 
     private val settingsListener: () -> Unit = { applySettings() }
+    private val otpListener: () -> Unit = { view?.post { refreshTopBar() } }
+    private var clipboard: android.content.ClipboardManager? = null
+    private val clipListener = android.content.ClipboardManager.OnPrimaryClipChangedListener { refreshTopBar() }
+    /** 지금 칸이 비밀번호 칸인지 (클립보드 내용을 가린다) */
+    private var secretField = false
 
     override fun onCreate() {
         super.onCreate()
@@ -53,11 +58,16 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
         engine.onSuggestions = { bar -> view?.suggestions = bar }
         engine.onStateChanged = { syncView() }
         FitKeyStore.addListener(settingsListener)
+        OtpStore.addListener(otpListener)
+        clipboard = getSystemService(CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        runCatching { clipboard?.addPrimaryClipChangedListener(clipListener) }
         applySettings()
     }
 
     override fun onDestroy() {
         FitKeyStore.removeListener(settingsListener)
+        OtpStore.removeListener(otpListener)
+        runCatching { clipboard?.removePrimaryClipChangedListener(clipListener) }
         FitKeyStore.save()
         super.onDestroy()
     }
@@ -126,7 +136,10 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
             engine.settings = engine.settings.copy(learn = false)
         }
         view?.enterLabel = enterLabel(info)
-        view?.stripHint = if (secret) "🔒 비밀번호 칸: 입력을 배우거나 기억하지 않아요" else ""
+        secretField = secret
+        // 비밀번호 칸에서도 클립보드(비밀번호 관리 앱에서 복사한 것)는 붙여 넣을 수 있게 위 줄을 보여 주되, 내용은 가린다
+        view?.stripHint = ""
+        refreshTopBar()
         syncView()
     }
 
@@ -212,6 +225,29 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
         }
     }
 
+    /** 클립보드 최근 기록: (붙여 넣을 글, 비밀 글인지). 1시간 넘게 지난 것은 보여 주지 않는다 */
+    private fun clipText(): Pair<String, Boolean>? = runCatching {
+        val cm = clipboard ?: return null
+        val desc = cm.primaryClipDescription ?: return null
+        if (System.currentTimeMillis() - desc.timestamp > 60 * 60_000L) return null
+        if (!desc.hasMimeType("text/*")) return null
+        val clip = cm.primaryClip ?: return null
+        val t = clip.getItemAt(0)?.coerceToText(this)?.toString()?.trim().orEmpty()
+        if (t.isEmpty()) return null
+        val sensitive = android.os.Build.VERSION.SDK_INT >= 33 && desc.extras?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true
+        t to sensitive
+    }.getOrNull()
+
+    /** 위 줄 다시 그리기: 인증번호가 있으면 인증번호, 없으면 클립보드 최근 기록 */
+    private fun refreshTopBar() {
+        val v = view ?: return
+        val o = OtpStore.fresh()
+        v.otp = o?.code
+        // 인증번호는 5분이 지나면 저절로 사라지게
+        if (o != null) v.postDelayed({ refreshTopBar() }, (o.at + OtpStore.VALID_MS - System.currentTimeMillis()).coerceAtLeast(1000))
+        v.clip = clipText()?.let { (t, sensitive) -> if (sensitive || secretField) "●●●●●● 붙여넣기" else t.take(60) }
+    }
+
     /** 스페이스바를 옆으로 밀면 한/영 바꾸기 */
     override fun onSpaceSwipe(dir: Int) {
         engine.onLang()
@@ -221,8 +257,8 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
     /** 추천 막대 자리의 도구 단추 */
     override fun onToolbar(action: String) {
         when (action) {
-            "size" -> { engine.resetWord(finish = true); view?.adjusting = true }
-            "switch" -> onLangLongPress()
+            "otp" -> OtpStore.fresh()?.let { o -> engine.onText(o.code); OtpStore.consume() }
+            "clip" -> clipText()?.let { engine.onText(it.first) }
             "settings" -> startActivity(
                 android.content.Intent(this, io.github.poohcjs.fitkey.ui.MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
             )

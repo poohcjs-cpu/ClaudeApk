@@ -120,6 +120,27 @@ class TouchModel {
         return s.map { sqrt((it.vx + it.vy) / 2) }.average().toFloat()
     }
 
+    /**
+     * 키보드 크기가 바뀌었을 때 배운 것을 새 크기로 환산한다.
+     * 손가락이 빗나가는 실제 거리(mm)는 그대로라서, 글쇠가 커지면 글쇠 단위로는 그만큼 작아진다.
+     * fx = 이전 글쇠 너비 ÷ 새 글쇠 너비, fy = 이전 줄 높이 ÷ 새 줄 높이
+     */
+    fun rescale(fx: Float, fy: Float) {
+        if (fx == 1f && fy == 1f) return
+        for (s in stats.values + global) {
+            s.mx *= fx; s.vx = (s.vx * fx * fx).coerceIn(0.03f, 0.6f)
+            s.my *= fy; s.vy = (s.vy * fy * fy).coerceIn(0.02f, 0.6f)
+        }
+        version++
+    }
+
+    /** 글쇠별 흩어짐의 평균 (가로는 글쇠 너비 단위, 세로는 줄 높이 단위). 자료가 3번 이상인 글쇠만. 없으면 null */
+    fun averageSpreads(minN: Float = 3f): Pair<Float, Float>? {
+        val s = stats.values.filter { it.n >= minN }
+        if (s.isEmpty()) return null
+        return s.map { sqrt(it.vx) }.average().toFloat() to s.map { sqrt(it.vy) }.average().toFloat()
+    }
+
     fun clear() {
         stats.clear()
         global.n = 0f; global.mx = 0f; global.my = 0f; global.vx = PRIOR_VAR; global.vy = priorVarY

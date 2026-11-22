@@ -3,4 +3,5 @@
     <string name="app_name">핏키보드</string>
     <string name="ime_name">핏키보드 (내 손에 맞춤)</string>
     <string name="subtype_ko">한국어·영어</string>
+    <string name="otp_name">핏키보드 인증번호 자동 표시</string>
 </resources>

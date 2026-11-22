@@ -47,7 +47,7 @@ class KeyboardView(context: Context) : View(context) {
         fun onSpaceSwipe(dir: Int) {}
         /** 크기·위치 조절 중 (done: '확인'을 눌러 끝냄) */
         fun onAdjust(height: Float, width: Float, align: Float, gap: Int, done: Boolean) {}
-        /** 추천 막대가 비었을 때의 도구 단추 ("size" 크기·위치, "settings" 설정) */
+        /** 추천 막대가 비었을 때의 단추 ("otp" 인증번호 넣기, "clip" 클립보드 붙여넣기, "settings" 설정) */
         fun onToolbar(action: String) {}
     }
 
@@ -77,8 +77,14 @@ class KeyboardView(context: Context) : View(context) {
     var bottomInset = 0; set(v) { field = v; requestLayout() }
     /** 스페이스바를 옆으로 밀면 한/영 바꾸기 (끄면 밀어서 커서 옮기기) */
     var spaceSwipeLang = true; set(v) { field = v; invalidate() }
-    /** 추천이 없을 때 도구 단추(크기·위치, 설정)를 보여 줄지 */
+    /** 추천이 없을 때 위 줄에 클립보드·인증번호·설정 단추를 보여 줄지 */
     var toolbar = false; set(v) { field = v; invalidate() }
+    /** 클립보드 최근 기록 (보여 줄 글, 비밀 글이면 가린 글) */
+    var clip: String? = null; set(v) { field = v; invalidate() }
+    /** 알림으로 온 인증번호 (보여 줄 때만) */
+    var otp: String? = null; set(v) { field = v; invalidate() }
+    private val chipRect = RectF()
+    private val gearRect = RectF()
     /** 크기·위치 조절 모드: 파란 테두리와 손잡이를 끌어서 맞춘다 */
     var adjusting = false; set(v) { if (field != v) { field = v; requestLayout() }; adjustTarget = null; invalidate() }
     /** 보정 화면: 다음에 눌러야 할 글쇠 */
@@ -238,9 +244,7 @@ class KeyboardView(context: Context) : View(context) {
                 text.textSize = 13 * sp; text.color = sub
                 c.drawText(stripHint, width / 2f, stripH / 2 - (text.descent() + text.ascent()) / 2, text)
             } else if (toolbar) {
-                drawToolButton(c, width / 6f, "⤢ 크기·위치")
-                drawToolButton(c, width / 2f, "⌨ 키보드")
-                drawToolButton(c, width * 5f / 6f, "⚙ 설정")
+                drawTopBar(c)
             }
             return
         }
@@ -259,13 +263,31 @@ class KeyboardView(context: Context) : View(context) {
         }
     }
 
-    private fun drawToolButton(c: Canvas, cx: Float, label: String) {
-        text.textSize = 13.5f * sp; text.color = sub; text.typeface = Typeface.DEFAULT_BOLD
-        val w = text.measureText(label) + 24 * dp
-        val r = RectF(cx - w / 2, stripH * 0.18f, cx + w / 2, stripH * 0.82f)
-        paint.color = if (dark) 0xFF2A2C32.toInt() else 0xFFD9DDE3.toInt()
-        c.drawRoundRect(r, r.height() / 2, r.height() / 2, paint)
-        c.drawText(label, cx, r.centerY() - (text.descent() + text.ascent()) / 2, text)
+    /** 위 줄: 왼쪽에 인증번호(있으면) 또는 클립보드 최근 기록, 오른쪽 끝에 설정 */
+    private fun drawTopBar(c: Canvas) {
+        val gearW = 40 * dp
+        gearRect.set(width - gearW - 6 * dp, stripH * 0.14f, width - 6 * dp, stripH * 0.86f)
+        text.textSize = 18 * sp; text.color = sub; text.typeface = Typeface.DEFAULT
+        c.drawText("⚙", gearRect.centerX(), gearRect.centerY() - (text.descent() + text.ascent()) / 2, text)
+        chipRect.setEmpty()
+        val label = when {
+            otp != null -> "🔑 인증번호 $otp  넣기"
+            clip != null -> "📋 ${clip!!.replace('\n', ' ')}"
+            else -> return
+        }
+        val isOtp = otp != null
+        text.textSize = 14.5f * sp
+        text.typeface = if (isOtp) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        val maxW = gearRect.left - 18 * dp - 24 * dp
+        val shown = ellipsize(label, maxW)
+        val w = text.measureText(shown) + 24 * dp
+        chipRect.set(10 * dp, stripH * 0.16f, 10 * dp + w, stripH * 0.84f)
+        paint.color = if (isOtp) brand else if (dark) 0xFF2A2C32.toInt() else 0xFFD9DDE3.toInt()
+        c.drawRoundRect(chipRect, chipRect.height() / 2, chipRect.height() / 2, paint)
+        text.color = if (isOtp) Color.WHITE else ink
+        text.textAlign = Paint.Align.LEFT
+        c.drawText(shown, chipRect.left + 12 * dp, chipRect.centerY() - (text.descent() + text.ascent()) / 2, text)
+        text.textAlign = Paint.Align.CENTER
     }
 
     private fun ellipsize(s: String, max: Float): String {
@@ -528,9 +550,12 @@ class KeyboardView(context: Context) : View(context) {
         if (id == stripDown) {
             stripDown = -1
             if (y < stripH && suggestions.items.isNotEmpty()) listener?.onSuggestion((x / (width / 3f)).toInt().coerceIn(0, suggestions.items.lastIndex))
-            else if (y < stripH && toolbar && stripHint.isEmpty()) listener?.onToolbar(
-                when { x < width / 3f -> "size"; x < width * 2f / 3f -> "switch"; else -> "settings" },
-            )
+            else if (y < stripH && toolbar && stripHint.isEmpty()) {
+                when {
+                    !chipRect.isEmpty && x <= chipRect.right + 8 * dp -> listener?.onToolbar(if (otp != null) "otp" else "clip")
+                    x >= gearRect.left - 8 * dp -> listener?.onToolbar("settings")
+                }
+            }
             return
         }
         val p = ptrs.remove(id) ?: return

@@ -30,6 +30,7 @@ class ViewTest {
             override fun onSpaceSwipe(dir: Int) { events += "swipe:$dir" }
             override fun onCursorMove(steps: Int) { events += "cursor:$steps" }
             override fun onAdjust(height: Float, width: Float, align: Float, gap: Int, done: Boolean) { events += "adjust:$done" }
+            override fun onToolbar(action: String) { events += "bar:$action" }
         }
         measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
         layout(0, 0, measuredWidth, measuredHeight)
@@ -90,5 +91,17 @@ class ViewTest {
         assertTrue(view.widthScale < 0.85f)
         assertTrue(view.align < -0.9f)
         assertTrue(events.contains("adjust:false"))
+    }
+
+    @Test fun topBarShowsClipboardAndSettings() {
+        view.toolbar = true
+        view.clip = "부산 해운대구 우동 123"
+        view.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(1200, view.measuredHeight, android.graphics.Bitmap.Config.ARGB_8888)))
+        ev(MotionEvent.ACTION_DOWN, 100f, strip / 2); ev(MotionEvent.ACTION_UP, 100f, strip / 2)
+        ev(MotionEvent.ACTION_DOWN, 1170f, strip / 2); ev(MotionEvent.ACTION_UP, 1170f, strip / 2)
+        view.otp = "482915"
+        view.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(1200, view.measuredHeight, android.graphics.Bitmap.Config.ARGB_8888)))
+        ev(MotionEvent.ACTION_DOWN, 100f, strip / 2); ev(MotionEvent.ACTION_UP, 100f, strip / 2)
+        assertEquals(listOf("bar:clip", "bar:settings", "bar:otp"), events)
     }
 }

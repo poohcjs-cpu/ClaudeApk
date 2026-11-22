@@ -27,6 +27,17 @@
             </intent-filter>
         </activity>
 
+        <!-- 인증번호 자동 표시: 사용자가 '알림 접근'을 허용했을 때만 동작 -->
+        <service
+            android:name=".ime.OtpListener"
+            android:exported="true"
+            android:label="@string/otp_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".ime.FitKeyService"
             android:exported="true"
