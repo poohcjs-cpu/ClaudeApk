@@ -113,4 +113,27 @@ class RealDictionaryTest {
             assertTrue(broken * 50 < n)   // 맞게 친 말을 망치는 일은 2% 미만
         }
     }
+
+    /** 낱말을 치는 동안 추천 막대: 이어질 말(자동 완성)과 고칠 말 */
+    @Test fun suggestionsWhileTyping() {
+        class Sink : io.github.poohcjs.fitkey.engine.TextSink {
+            val sb = StringBuilder(); var comp = ""
+            override fun setComposing(text: String) { comp = text }
+            override fun commit(text: String) { comp = ""; sb.append(text) }
+            override fun finishComposing() { sb.append(comp); comp = "" }
+            override fun deleteBefore(n: Int) { sb.setLength(maxOf(0, sb.length - n)) }
+            override fun sendBackspace() {}
+            override fun textBefore(n: Int) = (sb.toString() + comp).takeLast(n)
+            override fun enter() {}
+        }
+        val e = io.github.poohcjs.fitkey.engine.InputEngine(Sink(), touch, UserWords(), { if (it == Lang.KO) ko else en })
+        e.layout = layout
+        e.startInput(io.github.poohcjs.fitkey.engine.FieldInfo())
+        for (c in "dkssudgk") { val k = layout.keyOf(c)!!; e.onLetter(k, k.cx, k.cy) }   // '안녕하'
+        val words = e.suggestions.items.map { it.word }
+        println("‘안녕하’ 추천: $words")
+        assertTrue(words.any { it.startsWith("안녕하") && it.length > 3 })
+        e.onSpace()
+        println("띄어 쓴 뒤 추천: ${e.suggestions.items.map { it.word }}")
+    }
 }

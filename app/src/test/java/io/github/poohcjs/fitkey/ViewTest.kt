@@ -97,11 +97,12 @@ class ViewTest {
         view.toolbar = true
         view.clip = "부산 해운대구 우동 123"
         view.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(1200, view.measuredHeight, android.graphics.Bitmap.Config.ARGB_8888)))
-        ev(MotionEvent.ACTION_DOWN, 100f, strip / 2); ev(MotionEvent.ACTION_UP, 100f, strip / 2)
-        ev(MotionEvent.ACTION_DOWN, 1170f, strip / 2); ev(MotionEvent.ACTION_UP, 1170f, strip / 2)
+        // 설정은 왼쪽 끝, 클립보드·인증번호는 오른쪽
+        ev(MotionEvent.ACTION_DOWN, 1100f, strip / 2); ev(MotionEvent.ACTION_UP, 1100f, strip / 2)
+        ev(MotionEvent.ACTION_DOWN, 50f, strip / 2); ev(MotionEvent.ACTION_UP, 50f, strip / 2)
         view.otp = "482915"
         view.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(1200, view.measuredHeight, android.graphics.Bitmap.Config.ARGB_8888)))
-        ev(MotionEvent.ACTION_DOWN, 100f, strip / 2); ev(MotionEvent.ACTION_UP, 100f, strip / 2)
+        ev(MotionEvent.ACTION_DOWN, 1100f, strip / 2); ev(MotionEvent.ACTION_UP, 1100f, strip / 2)
         assertEquals(listOf("bar:clip", "bar:settings", "bar:otp"), events)
     }
 }

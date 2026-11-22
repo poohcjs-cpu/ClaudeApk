@@ -263,10 +263,10 @@ class KeyboardView(context: Context) : View(context) {
         }
     }
 
-    /** 위 줄: 왼쪽에 인증번호(있으면) 또는 클립보드 최근 기록, 오른쪽 끝에 설정 */
+    /** 위 줄: 왼쪽 끝에 설정(덜 씀), 오른쪽에 인증번호(있으면) 또는 클립보드 최근 기록(자주 씀, 엄지가 닿기 쉬운 쪽) */
     private fun drawTopBar(c: Canvas) {
         val gearW = 40 * dp
-        gearRect.set(width - gearW - 6 * dp, stripH * 0.14f, width - 6 * dp, stripH * 0.86f)
+        gearRect.set(6 * dp, stripH * 0.14f, 6 * dp + gearW, stripH * 0.86f)
         text.textSize = 18 * sp; text.color = sub; text.typeface = Typeface.DEFAULT
         c.drawText("⚙", gearRect.centerX(), gearRect.centerY() - (text.descent() + text.ascent()) / 2, text)
         chipRect.setEmpty()
@@ -278,10 +278,10 @@ class KeyboardView(context: Context) : View(context) {
         val isOtp = otp != null
         text.textSize = 14.5f * sp
         text.typeface = if (isOtp) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-        val maxW = gearRect.left - 18 * dp - 24 * dp
+        val maxW = width - gearRect.right - 18 * dp - 24 * dp
         val shown = ellipsize(label, maxW)
         val w = text.measureText(shown) + 24 * dp
-        chipRect.set(10 * dp, stripH * 0.16f, 10 * dp + w, stripH * 0.84f)
+        chipRect.set(width - 10 * dp - w, stripH * 0.16f, width - 10 * dp, stripH * 0.84f)
         paint.color = if (isOtp) brand else if (dark) 0xFF2A2C32.toInt() else 0xFFD9DDE3.toInt()
         c.drawRoundRect(chipRect, chipRect.height() / 2, chipRect.height() / 2, paint)
         text.color = if (isOtp) Color.WHITE else ink
@@ -552,8 +552,8 @@ class KeyboardView(context: Context) : View(context) {
             if (y < stripH && suggestions.items.isNotEmpty()) listener?.onSuggestion((x / (width / 3f)).toInt().coerceIn(0, suggestions.items.lastIndex))
             else if (y < stripH && toolbar && stripHint.isEmpty()) {
                 when {
-                    !chipRect.isEmpty && x <= chipRect.right + 8 * dp -> listener?.onToolbar(if (otp != null) "otp" else "clip")
-                    x >= gearRect.left - 8 * dp -> listener?.onToolbar("settings")
+                    x <= gearRect.right + 8 * dp -> listener?.onToolbar("settings")
+                    !chipRect.isEmpty && x >= chipRect.left - 8 * dp -> listener?.onToolbar(if (otp != null) "otp" else "clip")
                 }
             }
             return
