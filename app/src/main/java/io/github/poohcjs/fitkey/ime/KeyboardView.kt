@@ -77,10 +77,8 @@ class KeyboardView(context: Context) : View(context) {
     var spaceSwipeLang = true; set(v) { field = v; invalidate() }
     /** 추천이 없을 때 위 줄에 클립보드·인증번호·설정 단추를 보여 줄지 */
     var toolbar = false; set(v) { field = v; invalidate() }
-    /** 클립보드 최근 기록 (보여 줄 글, 비밀 글이면 가린 글) */
+    /** 방금 복사·잘라낸 글 (보여 줄 글, 비밀 글이면 가린 글). 1분 동안만, 붙여 넣으면 사라진다 */
     var clip: String? = null; set(v) { field = v; invalidate() }
-    /** 클립보드 기록이 방금(2분 안) 복사한 것인지: 그러면 '다음에 올 말' 예측보다 앞에 보여 준다 */
-    var clipFresh = false; set(v) { field = v; invalidate() }
     /** 알림으로 온 인증번호 (보여 줄 때만) */
     var otp: String? = null; set(v) { field = v; invalidate() }
     private val chipRect = RectF()
@@ -233,7 +231,7 @@ class KeyboardView(context: Context) : View(context) {
     /** 위 줄에 추천 대신 도구 줄(설정·인증번호·클립보드)을 보여 줄지 */
     private val showTopBar: Boolean
         get() = toolbar && stripHint.isEmpty() &&
-            (suggestions.items.isEmpty() || suggestions.predicted && (otp != null || clipFresh && clip != null))
+            (suggestions.items.isEmpty() || suggestions.predicted && (otp != null || clip != null))
 
     private fun drawStrip(c: Canvas) {
         val items = if (showTopBar) emptyList() else suggestions.items
@@ -255,9 +253,10 @@ class KeyboardView(context: Context) : View(context) {
         val cellW = width / 3f
         items.forEachIndexed { i, s ->
             val auto = i == suggestions.autoIndex
+            val likely = i == suggestions.likelyIndex
             text.textSize = 16 * sp
             text.typeface = if (auto) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-            text.color = if (auto) brand else ink
+            text.color = if (auto || likely) brand else ink
             val label = if (s.isTyped && !auto) "“${s.word}”" else s.word
             c.drawText(ellipsize(label, cellW - 12 * dp), cellW * i + cellW / 2, stripH / 2 - (text.descent() + text.ascent()) / 2, text)
             if (i > 0) {
@@ -267,7 +266,7 @@ class KeyboardView(context: Context) : View(context) {
         }
     }
 
-    /** 위 줄: 왼쪽 끝에 설정(덜 씀), 오른쪽에 인증번호(있으면) 또는 클립보드 최근 기록(자주 씀, 엄지가 닿기 쉬운 쪽) */
+    /** 위 줄: 왼쪽 끝에 설정(덜 씀), 오른쪽에 인증번호(있으면) 또는 방금 복사한 글(엄지가 닿기 쉬운 쪽) */
     private fun drawTopBar(c: Canvas) {
         val gearW = 40 * dp
         gearRect.set(6 * dp, stripH * 0.14f, 6 * dp + gearW, stripH * 0.86f)

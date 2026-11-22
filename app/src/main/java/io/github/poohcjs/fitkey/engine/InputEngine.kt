@@ -41,6 +41,8 @@ data class SuggestionBar(
     val autoIndex: Int? = null,
     /** 띄어 쓴 뒤 '다음에 올 말' 예측 (내가 이어 쓰던 말에서 배운 것) */
     val predicted: Boolean = false,
+    /** 치는 중에 오타가 나서 '노린 것 같은 말'을 가운데에 보여 줄 때 그 자리 (스페이스로는 들어가지 않고, 누르면 들어간다) */
+    val likelyIndex: Int? = null,
 )
 
 /** 사용자 설정 중 입력에 영향을 주는 것 */
@@ -236,7 +238,8 @@ class InputEngine(
         if (canLearn) {
             val k = s.key ?: Decoder.keysOf(strokes)
             userWords.add(lang, k, if (s.isTyped) 2 else 1)
-            learnWord(strokes, k, 1.2f)
+            // 이어질 말을 골랐으면 친 만큼의 앞부분으로 배운다 (앞에서 옆 글쇠를 눌렀던 것도 배운다)
+            learnWord(strokes, k.take(strokes.size), 1.2f)
             ctx?.let { bigrams.add(lang, it, k) }
         }
         word.clear(); composing = ""; lastCorrection = null; deleted = null
@@ -407,33 +410,38 @@ class InputEngine(
         }
         val key = Decoder.keysOf(word)
         val typed = composing
-        val items = ArrayList<Suggestion>()
-        fun add(s: Suggestion) { if (items.none { it.word == s.word } && items.size < 3) items += s }
+        fun show(c: Candidate) = Suggestion(Decoder.matchCase(c.word, typed, lang), c.key, false)
 
+        // 스페이스를 누르면 고칠 말 (다 친 낱말이 확실한 오타일 때만)
         val fix = if (canCorrect && word.size >= 2) decoder.autoCorrect(word, typed, lang, dict, userWords, layout) else null
-        val corrections = decoder.candidates(word, lang, dict, userWords, layout).filter { it.key != key }.take(2)
+        // 노린 것 같은 말: 같은 길이로 고친 말 + 고친 앞부분으로 이어질 말, 그럴듯한 순
+        val ranked = (decoder.candidates(word, lang, dict, userWords, layout).take(4) + decoder.completions(word, lang, dict, userWords, layout, 4))
+            .filter { it.key != key }.sortedByDescending { it.score }.distinctBy { it.key }
         // 앞 낱말 다음에 내가 쓰던 말이 지금 친 글쇠로 시작하면 먼저 (한 번 쓴 것도)
         val following = if (field.incognito) emptyList() else context?.let { bigrams.next(lang, it, prefix = key, max = 2, min = 1) }.orEmpty()
-        val completions = (following + userWords.completions(lang, key, 2) + dict.completions(key, 4))
-            .filter { it.first != key }.distinctBy { it.first }
-        // 가운데: 스페이스를 누르면 들어갈 말 (고칠 말이 있으면 그 말, 아니면 친 그대로)
-        val center = fix?.let { Suggestion(it.to, it.toKey, false) } ?: Suggestion(typed, key, true)
-        val left = if (fix != null) Suggestion(typed, key, true) else null
-        val others = following.filter { it.first != key }.map { Suggestion(Decoder.matchCase(dict.wordOf(it.first), typed, lang), it.first, false) } +
-            corrections.map { Suggestion(Decoder.matchCase(it.word, typed, lang), it.key, false) } +
-            completions.map { Suggestion(Decoder.matchCase(dict.wordOf(it.first), typed, lang), it.first, false) }
+        val plain = (userWords.completions(lang, key, 2) + dict.completions(key, 4)).filter { it.first != key }
+        // 치는 중에 이미 오타가 났다: 친 글쇠로 시작하는 낱말이 없다 → 노린 말을 가운데에 미리 보여 준다
+        val typo = fix == null && ranked.isNotEmpty() && !decoder.isValid(typed, key, lang, dict, userWords) &&
+            !dict.hasPrefix(key) && !userWords.hasPrefix(lang, key)
+        val likely = if (typo) show(ranked.first()) else null
+
+        // 가운데 칸: 고칠 말(굵게, 스페이스로 들어감) · 노린 것 같은 말(파랗게, 누르면 들어감) · 친 그대로(굵게)
+        val mid = fix?.let { Suggestion(it.to, it.toKey, false) } ?: likely ?: Suggestion(typed, key, true)
         val list = ArrayList<Suggestion>()
-        left?.let { list += it }
-        list += center
-        others.forEach { o -> if (list.none { it.word == o.word }) list += o }
-        list.forEach { add(it) }
-        // 가운데 칸에 오도록 순서를 맞춘다: [다른 후보, 가운데, 다른 후보]
-        val ordered = if (items.size == 3) {
-            val c = items.indexOfFirst { it.word == center.word }
-            val rest = items.filterIndexed { i, _ -> i != c }
-            listOf(rest[0], items[c], rest[1])
-        } else items
-        bar = SuggestionBar(ordered, ordered.indexOfFirst { it.word == center.word }.takeIf { it >= 0 })
+        list += mid
+        if (mid.isTyped.not()) list += Suggestion(typed, key, true)
+        val others = following.map { Suggestion(Decoder.matchCase(dict.wordOf(it.first), typed, lang), it.first, false) } +
+            ranked.map { show(it) } +
+            plain.map { Suggestion(Decoder.matchCase(dict.wordOf(it.first), typed, lang), it.first, false) }
+        others.forEach { o -> if (list.size < 3 && list.none { it.word == o.word }) list += o }
+        // 가운데 칸에 오도록: [다른 후보, 가운데, 다른 후보]
+        val ordered = when (list.size) {
+            3 -> listOf(list[1], list[0], list[2])
+            2 -> listOf(list[1], list[0])
+            else -> list
+        }
+        val at = ordered.indexOf(mid)
+        bar = if (likely != null) SuggestionBar(ordered, autoIndex = null, likelyIndex = at) else SuggestionBar(ordered, autoIndex = at)
         onSuggestions(bar)
     }
 }

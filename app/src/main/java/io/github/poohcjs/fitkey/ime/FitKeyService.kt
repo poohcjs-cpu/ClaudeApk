@@ -50,6 +50,8 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
     private val clipListener = android.content.ClipboardManager.OnPrimaryClipChangedListener { refreshTopBar() }
     /** 지금 칸이 비밀번호 칸인지 (클립보드 내용을 가린다) */
     private var secretField = false
+    /** 위 줄에서 붙여 넣은 클립의 복사 시각 (같은 것은 다시 띄우지 않는다) */
+    private var pastedClipAt = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -227,11 +229,15 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
         }
     }
 
-    /** 클립보드 최근 기록: (붙여 넣을 글, 비밀 글인지, 복사한 때). 1시간 넘게 지난 것은 보여 주지 않는다 */
+    /**
+     * 방금 복사·잘라낸 글: (붙여 넣을 글, 비밀 글인지, 복사한 때).
+     * 복사한 지 1분 안에만 보여 주고, 위 줄에서 한 번 붙여 넣으면 더는 보여 주지 않는다.
+     */
     private fun clipText(): Triple<String, Boolean, Long>? = runCatching {
         val cm = clipboard ?: return null
         val desc = cm.primaryClipDescription ?: return null
-        if (System.currentTimeMillis() - desc.timestamp > 60 * 60_000L) return null
+        val age = System.currentTimeMillis() - desc.timestamp
+        if (age > CLIP_SHOW_MS || age < -5_000L || desc.timestamp == pastedClipAt) return null
         if (!desc.hasMimeType("text/*")) return null
         val clip = cm.primaryClip ?: return null
         val t = clip.getItemAt(0)?.coerceToText(this)?.toString()?.trim().orEmpty()
@@ -240,19 +246,20 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
         Triple(t, sensitive, desc.timestamp)
     }.getOrNull()
 
-    /** 위 줄 다시 그리기: 인증번호가 있으면 인증번호, 없으면 클립보드 최근 기록 */
+    /** 위 줄 다시 그리기: 인증번호가 있으면 인증번호, 없으면 방금 복사한 글 */
+    private val topBarTimer = Runnable { refreshTopBar() }
+
     private fun refreshTopBar() {
         val v = view ?: return
+        v.removeCallbacks(topBarTimer)
+        val now = System.currentTimeMillis()
         val o = OtpStore.fresh()
         v.otp = o?.code
-        // 인증번호는 5분이 지나면 저절로 사라지게
-        if (o != null) v.postDelayed({ refreshTopBar() }, (o.at + OtpStore.VALID_MS - System.currentTimeMillis()).coerceAtLeast(1000))
         val clip = clipText()
         v.clip = clip?.let { (t, sensitive) -> if (sensitive || secretField) "●●●●●● 붙여넣기" else t.take(60) }
-        // 방금(2분 안에) 복사한 것은 '다음에 올 말' 예측보다 앞에 보여 준다
-        val age = clip?.let { System.currentTimeMillis() - it.third } ?: Long.MAX_VALUE
-        v.clipFresh = age < CLIP_FRESH_MS
-        if (v.clipFresh) v.postDelayed({ refreshTopBar() }, (CLIP_FRESH_MS - age).coerceAtLeast(1000))
+        // 인증번호는 5분, 복사한 글은 1분이 지나면 저절로 사라지게
+        val until = listOfNotNull(o?.let { it.at + OtpStore.VALID_MS }, clip?.let { it.third + CLIP_SHOW_MS }).minOrNull()
+        if (until != null) v.postDelayed(topBarTimer, (until - now).coerceAtLeast(500))
     }
 
     /** 스페이스바를 옆으로 밀면 한/영 바꾸기 */
@@ -265,7 +272,7 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
     override fun onToolbar(action: String) {
         when (action) {
             "otp" -> OtpStore.fresh()?.let { o -> engine.onText(o.code); OtpStore.consume() }
-            "clip" -> clipText()?.let { engine.onText(it.first) }
+            "clip" -> clipText()?.let { (t, _, at) -> engine.onText(t); pastedClipAt = at; refreshTopBar() }
             "settings" -> startActivity(
                 android.content.Intent(this, io.github.poohcjs.fitkey.ui.MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
             )
@@ -295,7 +302,8 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
             v.showStrip = true
         }
 
-        private const val CLIP_FRESH_MS = 2 * 60_000L
+        /** 복사한 글을 위 줄에 보여 주는 시간 */
+        private const val CLIP_SHOW_MS = 60_000L
         private val SYM1 = KeyboardLayout.symbols(1)
         private val SYM2 = KeyboardLayout.symbols(2)
     }

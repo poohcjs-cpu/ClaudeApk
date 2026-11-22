@@ -27,13 +27,14 @@ data class Correction(val from: String, val to: String, val toKey: String, val s
  */
 class Decoder(private val touch: TouchModel) {
 
-    fun candidates(
-        strokes: List<Stroke>, lang: Lang, dict: Dictionary?, user: UserWords?, layout: KeyboardLayout, beamWidth: Int = 48,
-    ): List<Candidate> {
+    private data class Beam(val prefix: String, val spatial: Float, val edits: Int)
+
+    /** 누른 자리마다 그럴듯한 글쇠를 골라, 사전 낱말의 앞부분이 되는 글쇠 문자열들 (그럴듯한 순) */
+    private fun beams(
+        strokes: List<Stroke>, lang: Lang, dict: Dictionary?, user: UserWords?, layout: KeyboardLayout, beamWidth: Int,
+    ): List<Beam> {
         if (strokes.isEmpty()) return emptyList()
         val maxEdits = if (strokes.size <= 4) 1 else 2
-        data class Beam(val prefix: String, val spatial: Float, val edits: Int)
-
         var beams = listOf(Beam("", 0f, 0))
         for (s in strokes) {
             val cands = touch.candidates(layout, s.ux, s.uy, max = 4).toMutableList()
@@ -52,7 +53,14 @@ class Decoder(private val touch: TouchModel) {
             if (next.isEmpty()) return emptyList()
             beams = next.sortedByDescending { it.spatial }.take(beamWidth)
         }
-        return beams.mapNotNull { b ->
+        return beams
+    }
+
+    /** 친 글쇠 수와 같은 길이의 사전 낱말 후보 (옆 글쇠·Shift 실수를 고친 것) */
+    fun candidates(
+        strokes: List<Stroke>, lang: Lang, dict: Dictionary?, user: UserWords?, layout: KeyboardLayout, beamWidth: Int = 48,
+    ): List<Candidate> {
+        return beams(strokes, lang, dict, user, layout, beamWidth).mapNotNull { b ->
             val dictLp = dict?.logProb(b.prefix)
             val userN = user?.count(lang, b.prefix) ?: 0
             val lp = when {
@@ -63,6 +71,34 @@ class Decoder(private val touch: TouchModel) {
             }
             Candidate(b.prefix, dict?.wordOf(b.prefix) ?: b.prefix, b.spatial + lp, b.edits, dictLp != null)
         }.sortedByDescending { it.score }
+    }
+
+    /**
+     * 치는 중인 낱말이 이어질 말: 앞부분을 고친 것까지 함께 본다.
+     * 예: '감사합니다'를 치다 ㅎ 대신 ㅗ를 눌러 '감사ㅘㅂ니'가 되어도, 낱말을 다 치기 전에 '감사합니다'를 보여 준다.
+     * 다 친 낱말(같은 길이)은 [candidates]가 맡는다.
+     */
+    fun completions(
+        strokes: List<Stroke>, lang: Lang, dict: Dictionary?, user: UserWords?, layout: KeyboardLayout, max: Int = 3,
+    ): List<Candidate> {
+        if (dict == null || strokes.size < 2) return emptyList()
+        val out = HashMap<String, Candidate>()
+        fun put(c: Candidate) { if ((out[c.key]?.score ?: Float.NEGATIVE_INFINITY) < c.score) out[c.key] = c }
+        for (b in beams(strokes, lang, dict, user, layout, 48).take(10)) {
+            // 두 글쇠만 친 낱말은 친 그대로 이어지는 말만 (고친 앞부분은 너무 넓다)
+            if (b.edits > 0 && strokes.size < 3) continue
+            for ((k, n) in dict.completions(b.prefix, 3, scanLimit = 1500)) {
+                if (k.length == b.prefix.length || n <= 0) continue
+                val lp = dict.logProb(k) ?: continue
+                put(Candidate(k, dict.wordOf(k), b.spatial + lp, b.edits, true))
+            }
+            if (user != null) for ((k, n) in user.completions(lang, b.prefix, 2)) {
+                if (k.length == b.prefix.length) continue
+                val lp = dict.logProb(k)?.let { it + 1f } ?: (dict.unknownLogProb + 6f + minOf(n, 10))
+                put(Candidate(k, dict.wordOf(k), b.spatial + lp, b.edits, dict.count(k) > 0))
+            }
+        }
+        return out.values.sortedByDescending { it.score }.take(max)
     }
 
     /** 글쇠 하나가 낼 수 있는 사전 글쇠 문자 (+ 덧붙는 감점) */

@@ -136,4 +136,28 @@ class RealDictionaryTest {
         e.onSpace()
         println("띄어 쓴 뒤 추천: ${e.suggestions.items.map { it.word }}")
     }
+
+    /** 치다가 옆 글쇠를 눌러도, 낱말을 다 치기 전에 노린 말을 가운데에 보여 주고, 누르면 그 말로 바뀐다 */
+    @Test fun showsIntendedWordWhileTyping() {
+        val sink = EngineTest.FakeSink()
+        val e = io.github.poohcjs.fitkey.engine.InputEngine(sink, touch, UserWords(), { if (it == Lang.KO) ko else en })
+        e.layout = layout
+        e.startInput(io.github.poohcjs.fitkey.engine.FieldInfo())
+        val keys = "rkatkgkqsl"                          // '감사합니' (감사합니다를 치는 중)
+        keys.forEachIndexed { i, c ->
+            val k = layout.keyOf(c)!!
+            val hit = if (i == 5) layout.keyOf('h')!! else k  // ㅎ 대신 아래 ㅗ를 누름
+            val ux = k.cx + (hit.cx - k.cx) * 0.7f
+            val uy = k.cy + (hit.cy - k.cy) * 0.7f
+            e.onLetter(touch.hit(layout, ux, uy)!!, ux, uy)
+        }
+        val bar = e.suggestions
+        println("‘${e.currentText}’ 추천: ${bar.items.map { it.word }} (가운데 ${bar.likelyIndex})")
+        assertEquals("감사ㅘㅂ니", e.currentText)
+        assertNull(bar.autoIndex)                        // 스페이스로는 바꾸지 않는다 (다 친 게 아니니까)
+        val i = bar.likelyIndex!!
+        assertEquals("감사합니다", bar.items[i].word)
+        e.onSuggestion(i)
+        assertEquals("감사합니다 ", sink.text)
+    }
 }

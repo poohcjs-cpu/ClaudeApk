@@ -285,7 +285,7 @@ private fun HomeScreen(tick: Int, onSize: () -> Unit, onCalibrate: () -> Unit) {
 
         Spacer(Modifier.height(14.dp))
         Text(
-            "한/영 전환: 스페이스바를 옆으로 밀기 · 숫자 패드: 123 글쇠 · 다른 키보드(삼성 키보드 등)로 바꾸기: 123 글쇠를 길게 누르거나 화면 아래 키보드 아이콘 · 커서 이동: 스페이스바를 길게 누른 뒤 밀기 · 키보드 맨 위: 클립보드 최근 기록(누르면 붙여넣기), 인증번호, 설정\n\n" +
+            "한/영 전환: 스페이스바를 옆으로 밀기 · 숫자 패드: 123 글쇠 · 다른 키보드(삼성 키보드 등)로 바꾸기: 123 글쇠를 길게 누르거나 화면 아래 키보드 아이콘 · 커서 이동: 스페이스바를 길게 누른 뒤 밀기 · 키보드 맨 위: 방금 복사·잘라낸 글(1분 동안, 누르면 붙여넣기), 인증번호, 설정 · 치다가 오타가 나면 노린 말이 맨 위 가운데에 파랗게 떠요(누르면 바뀜)\n\n" +
                 "사전: FrequencyWords (OpenSubtitles 2018, Hermit Dave) · CC BY-SA 4.0",
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp,
         )

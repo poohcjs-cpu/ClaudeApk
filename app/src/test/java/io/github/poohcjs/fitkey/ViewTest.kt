@@ -125,19 +125,17 @@ class ViewTest {
         assertEquals(listOf("key:${q.id}", "key:${l.id}"), events)
     }
 
-    /** 띄어 쓴 뒤 예측은 인증번호·방금 복사한 것에 자리를 내준다 (치는 중 추천은 그대로) */
-    @Test fun predictionsGiveWayToOtpAndFreshClip() {
+    /** 띄어 쓴 뒤 예측은 인증번호·방금 복사한 글에 자리를 내준다 (치는 중 추천은 그대로) */
+    @Test fun predictionsGiveWayToOtpAndClip() {
         view.toolbar = true
         view.suggestions = SuggestionBar(listOf(Suggestion("날씨", "skfTl", false)), null, predicted = true)
         drawNow(); tap(100f, strip / 2)                   // 예측을 누름
         view.clip = "부산 해운대구"
-        drawNow(); tap(100f, strip / 2)                   // 오래된 클립보드보다 예측이 앞
-        view.clipFresh = true
-        drawNow(); tap(1100f, strip / 2)                  // 방금 복사한 것은 예측보다 앞
-        view.clip = null; view.clipFresh = false; view.otp = "482915"
+        drawNow(); tap(1100f, strip / 2)                  // 방금 복사한 글은 예측보다 앞
+        view.clip = null; view.otp = "482915"
         drawNow(); tap(1100f, strip / 2)                  // 인증번호도 예측보다 앞
         view.suggestions = SuggestionBar(listOf(Suggestion("날", "skf", true)), 0)
         drawNow(); tap(100f, strip / 2)                   // 낱말을 치는 중이면 추천이 앞
-        assertEquals(listOf("sug:0", "sug:0", "bar:clip", "bar:otp", "sug:0"), events)
+        assertEquals(listOf("sug:0", "bar:clip", "bar:otp", "sug:0"), events)
     }
 }

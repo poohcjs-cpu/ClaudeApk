@@ -44,7 +44,7 @@ class ScreenshotTest {
     private fun keyboard(block: KeyboardView.() -> Unit = {}) = KeyboardView(ctx).apply { block() }
 
     @Test fun koreanKeyboard() = save("1_ko", keyboard {
-        suggestions = SuggestionBar(listOf(Suggestion("안녕하세오", null, true), Suggestion("안녕하세요", null, false), Suggestion("안녕하세요오", null, false)), 1)
+        suggestions = SuggestionBar(listOf(Suggestion("감사ㅘㅂ니", null, true), Suggestion("감사합니다", null, false), Suggestion("감사합니다만", null, false)), null, likelyIndex = 1)
     })
 
     @Test fun koreanShift() = save("2_ko_shift", keyboard { shift = ShiftState.ONCE })
