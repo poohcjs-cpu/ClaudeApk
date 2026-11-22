@@ -35,11 +35,13 @@ class AdvisorAndOtpTest {
         assertTrue(a.to.height < 1.3f && a.to.height >= SizeAdvisor.MIN_HEIGHT)
     }
 
-    @Test fun weakLeftEdgeMovesKeyboardRight() {
+    @Test fun weakLeftEdgeOnlySuggestsOneHandMode() {
         val left = setOf('q', 'w', 'e', 'a', 's', 'z', 'x')
         val a = SizeAdvisor.advise(base, 0.18f, 0.15f, stats(miss = { if (it in left) 3 else 0 }), rows)
-        assertEquals(1f, a.to.align)
-        assertTrue(a.to.width <= 0.85f)
+        // 한 손 모드는 저절로 켜지 않는다: 위치·너비는 그대로, 권하는 말만
+        assertEquals(base.align, a.to.align)
+        assertEquals(base.width, a.to.width)
+        assertTrue(a.reasons.any { "한 손 모드" in it })
     }
 
     @Test fun bottomRowPressedHighRaisesKeyboard() {

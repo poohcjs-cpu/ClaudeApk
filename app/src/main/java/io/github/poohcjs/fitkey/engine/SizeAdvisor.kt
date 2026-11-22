@@ -10,7 +10,8 @@ import kotlin.math.sqrt
  * 1) 크기: 손가락 터치의 흩어짐(σ)은 글쇠를 키워도 실제 거리(mm)는 그대로라, 글쇠 단위로는 줄어든다.
  *    치우침은 보정으로 메우므로, 흩어짐 때문에 글쇠 밖으로 나가는 비율(빗나감)을 정규분포로 계산해
  *    빗나감이 목표(약 3%) 아래가 되는 가장 작은 크기를 고른다. 이미 충분히 정확하면 조금 줄여 화면을 넓힌다.
- * 2) 좌우 위치: 한쪽 끝 글쇠만 유독 자주 빗나가면 (엄지가 잘 닿지 않는 쪽) 키보드를 반대쪽으로 모은다.
+ * 2) 좌우: 한쪽 끝 글쇠만 유독 자주 빗나가면 (엄지가 잘 닿지 않는 쪽) 한 손 모드를 권한다.
+ *    키보드를 좁히고 옮기는 것은 사용자가 설정에서 직접 켤 때만 한다 (저절로 켜지면 불편했다).
  * 3) 위아래 위치: 아래 줄을 늘 위쪽으로 누르면 키보드를 조금 올린다 (화면 아래 끝이 불편한 경우).
  */
 object SizeAdvisor {
@@ -49,7 +50,7 @@ object SizeAdvisor {
         val reasons = ArrayList<String>()
         var h = now.height
         var w = now.width
-        var align = now.align
+        val align = now.align
         var gap = now.bottomGap
 
         // ── 1. 크기 ──
@@ -85,7 +86,7 @@ object SizeAdvisor {
             }
         }
 
-        // ── 2. 좌우: 한쪽 끝만 유독 빗나가면 반대쪽으로 모으기 ──
+        // ── 2. 좌우: 한쪽 끝만 유독 빗나가면 한 손 모드를 권한다 (바꾸지는 않는다) ──
         fun rate(list: List<KeyStat>): Float? {
             val n = list.sumOf { it.n }
             return if (n < 10) null else list.sumOf { it.misses }.toFloat() / n
@@ -93,12 +94,11 @@ object SizeAdvisor {
         val left = rate(keys.filter { it.cx < 3.4f })
         val right = rate(keys.filter { it.cx > 6.6f })
         if (left != null && right != null) {
-            if (left >= 0.2f && left >= right * 2.5f) {
-                w = minOf(w, 0.85f); align = 1f
-                reasons += "왼쪽 끝 글쇠를 자주 놓쳐요 (${pct(left)}%) → 키보드를 오른쪽으로 모아 엄지가 닿기 쉽게"
-            } else if (right >= 0.2f && right >= left * 2.5f) {
-                w = minOf(w, 0.85f); align = -1f
-                reasons += "오른쪽 끝 글쇠를 자주 놓쳐요 (${pct(right)}%) → 키보드를 왼쪽으로 모아 엄지가 닿기 쉽게"
+            val oneHand = now.width < 0.95f
+            if (left >= 0.2f && left >= right * 2.5f && !(oneHand && now.align > 0.5f)) {
+                reasons += "왼쪽 끝 글쇠를 자주 놓쳐요 (${pct(left)}%). 오른손으로만 친다면 설정의 ‘한 손 모드: 오른손’을 켜 보세요"
+            } else if (right >= 0.2f && right >= left * 2.5f && !(oneHand && now.align < -0.5f)) {
+                reasons += "오른쪽 끝 글쇠를 자주 놓쳐요 (${pct(right)}%). 왼손으로만 친다면 설정의 ‘한 손 모드: 왼손’을 켜 보세요"
             }
         }
 

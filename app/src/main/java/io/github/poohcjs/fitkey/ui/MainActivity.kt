@@ -157,7 +157,7 @@ private fun HomeScreen(tick: Int, onSize: () -> Unit, onCalibrate: () -> Unit) {
     var s by remember { mutableStateOf(FitKeyStore.settings(c)) }
     fun update(n: KeySettings) { s = n; FitKeyStore.saveSettings(c, n) }
     val calibrated = remember(tick) { FitKeyStore.calibrations(c) }
-    var learned by remember(tick) { mutableStateOf(FitKeyStore.touch.samples to FitKeyStore.userWords.size) }
+    var learned by remember(tick) { mutableStateOf(Triple(FitKeyStore.touch.samples, FitKeyStore.userWords.size, FitKeyStore.bigrams.size)) }
     var tryText by remember { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().padding(horizontal = 20.dp)) {
@@ -235,11 +235,12 @@ private fun HomeScreen(tick: Int, onSize: () -> Unit, onCalibrate: () -> Unit) {
                 Text("›", fontSize = 24.sp, color = MaterialTheme.colorScheme.primary)
             }
             Spacer(Modifier.height(6.dp))
+            OneHandRow(s) { update(it) }
             Toggle("숫자 줄 보이기", "맨 위에 1~0 줄", s.numberRow) { update(s.copy(numberRow = it)) }
             Toggle("스페이스바 밀어서 한/영 전환", "끄면 밀어서 커서 이동, 123 글쇠 자리에 한/A 글쇠가 다시 나와요", s.spaceSwipeLang) { update(s.copy(spaceSwipeLang = it)) }
             Toggle("자동 오타 수정", "스페이스를 누를 때 확실한 오타만 고쳐요", s.autoCorrect) { update(s.copy(autoCorrect = it)) }
-            Toggle("추천 낱말", "키보드 위에 고칠 말·이어질 말을 보여 줘요", s.suggestions) { update(s.copy(suggestions = it)) }
-            Toggle("쓰면서 배우기", "지우고 다시 친 글쇠, 고친 오타로 손 습관을 계속 배워요", s.learn) { update(s.copy(learn = it)) }
+            Toggle("추천 낱말", "고칠 말·이어질 말, 띄어 쓴 뒤엔 내가 자주 이어 쓰던 다음 낱말", s.suggestions) { update(s.copy(suggestions = it)) }
+            Toggle("쓰면서 배우기", "손 습관(지우고 다시 친 글쇠·고친 오타)과 자주 쓰는 말 순서를 이 폰 안에서 배워요", s.learn) { update(s.copy(learn = it)) }
             Toggle("누를 때 진동", null, s.vibrate) { update(s.copy(vibrate = it)) }
         }
 
@@ -274,11 +275,12 @@ private fun HomeScreen(tick: Int, onSize: () -> Unit, onCalibrate: () -> Unit) {
         Spacer(Modifier.height(14.dp))
         Card {
             Text("배운 것", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            Text("터치 ${learned.first}번 · 내 낱말 ${learned.second}개", fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
-            Text("모두 이 휴대폰에만 저장돼요. 이 앱은 인터넷 권한이 없어 입력한 글을 밖으로 보낼 수 없고, 비밀번호 칸에서는 아무것도 배우거나 기억하지 않아요.",
+            Text("터치 ${learned.first}번 · 내 낱말 ${learned.second}개 · 이어 쓰는 말 ${learned.third}쌍", fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
+            Text("모두 이 휴대폰에만 저장돼요. 이 앱은 인터넷 권한이 없어 입력한 글을 밖으로 보낼 수 없고, 비밀번호 칸·시크릿 모드에서는 아무것도 배우거나 기억하지 않아요. " +
+                "‘이어 쓰는 말’은 같은 순서로 두 번 넘게 쓴 낱말을 띄어 쓴 뒤 키보드 맨 위에 먼저 보여 줘요.",
                 fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 17.sp, modifier = Modifier.padding(top = 6.dp))
             Spacer(Modifier.height(8.dp))
-            OutlinedButton({ FitKeyStore.clearLearning(); learned = 0 to 0 }) { Text("배운 것 모두 지우기") }
+            OutlinedButton({ FitKeyStore.clearLearning(); learned = Triple(0, 0, 0) }) { Text("배운 것 모두 지우기") }
         }
 
         Spacer(Modifier.height(14.dp))
@@ -488,7 +490,7 @@ private fun SizeAdviceCard(a: io.github.poohcjs.fitkey.engine.SizeAdvisor.Advice
         val now = Math.round(a.missNow * 1000) / 10f
         val after = Math.round(a.missAfter * 1000) / 10f
         if (!a.changed) {
-            Text("지금 크기·위치가 손에 잘 맞아요 👍", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text(if (a.reasons.isEmpty()) "지금 크기·위치가 손에 잘 맞아요 👍" else "크기는 지금이 알맞아요", fontWeight = FontWeight.Bold, fontSize = 15.sp)
             Text("흩어짐으로 계산한 빗나감 약 $now%", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             a.reasons.forEach { Text("· $it", fontSize = 13.sp, lineHeight = 18.sp) }
             return@Column
@@ -556,8 +558,8 @@ private fun SizeScreen(onDone: () -> Unit) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(20.dp)) {
             Text("키보드 크기·위치", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
             Text(
-                "아래 키보드의 파란 손잡이를 끌어서 맞추세요.\n· 위·아래 손잡이: 높이\n· 왼쪽·오른쪽 손잡이: 너비 (줄이면 한 손 모드)\n· 가운데 ✥: 키보드 옮기기 (위·아래·옆)\n" +
-                    "다 되면 ‘확인’을 누르세요. 키보드를 쓰다가도 추천 막대의 ‘⤢ 크기·위치’를 누르면 같은 방법으로 바꿀 수 있어요.",
+                "아래 키보드의 파란 손잡이를 끌어서 맞추세요.\n· 위·아래 손잡이: 높이\n· 왼쪽·오른쪽 손잡이: 너비\n· 가운데 ✥: 키보드 옮기기 (위·아래·옆)\n" +
+                    "다 되면 ‘확인’을 누르세요. 키보드를 쓰다가도 맨 위 왼쪽 ⚙를 누르면 이 화면으로 올 수 있어요.",
                 fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 19.sp,
             )
             Spacer(Modifier.height(12.dp))
@@ -566,9 +568,8 @@ private fun SizeScreen(onDone: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Preset("기본") { update(s.copy(height = 1f, width = 1f, align = 0f, bottomGap = 0)) }
                 Preset("크게") { update(s.copy(height = 1.2f, width = 1f, align = 0f)) }
-                Preset("한 손 ←") { update(s.copy(width = 0.78f, align = -1f)) }
-                Preset("한 손 →") { update(s.copy(width = 0.78f, align = 1f)) }
             }
+            OneHandRow(s) { update(it) }
             Text(
                 "지금: 높이 ${(s.height * 100).toInt()}% · 너비 ${(s.width * 100).toInt()}%" + (if (s.bottomGap > 0) " · 아래 여백 ${s.bottomGap}dp" else ""),
                 fontSize = 12.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp),
@@ -615,6 +616,43 @@ private fun SizeScreen(onDone: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
         )
     }
+}
+
+/** 한 손 모드: 0 끄기, -1 왼손, 1 오른손, null 그 밖 (가운데에 좁게 등 손잡이로 맞춘 모양) */
+private fun oneHandSide(s: KeySettings): Int? = when {
+    s.width >= 0.95f -> 0
+    s.align <= -0.5f -> -1
+    s.align >= 0.5f -> 1
+    else -> null
+}
+
+/** 한 손 모드 켜고 끄기. 켤 때는 전에 맞춘 좁은 너비를 그대로, 없으면 80% */
+@Composable
+private fun OneHandRow(s: KeySettings, update: (KeySettings) -> Unit) {
+    val side = oneHandSide(s)
+    val narrow = if (s.width < 0.95f) s.width else 0.8f
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Text("한 손 모드", fontSize = 14.5.sp)
+        Text("키보드를 좁혀 한쪽으로 모아요. 빈 쪽을 눌러도 키보드가 옮겨지지 않고 가장 가까운 글쇠로 쳐져요.",
+            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 16.sp)
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Choice("끄기", side == 0) { update(s.copy(width = 1f, align = 0f)) }
+            Choice("왼손", side == -1) { update(s.copy(width = narrow, align = -1f)) }
+            Choice("오른손", side == 1) { update(s.copy(width = narrow, align = 1f)) }
+        }
+    }
+}
+
+@Composable
+private fun Choice(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold,
+        color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.clip(RoundedCornerShape(10.dp))
+            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+    )
 }
 
 @Composable

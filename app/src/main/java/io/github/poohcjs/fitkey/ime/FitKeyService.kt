@@ -54,7 +54,7 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
     override fun onCreate() {
         super.onCreate()
         FitKeyStore.init(this)
-        engine = InputEngine(sink, FitKeyStore.touch, FitKeyStore.userWords, { FitKeyStore.dict(it) })
+        engine = InputEngine(sink, FitKeyStore.touch, FitKeyStore.userWords, { FitKeyStore.dict(it) }, bigrams = FitKeyStore.bigrams)
         engine.onSuggestions = { bar -> view?.suggestions = bar }
         engine.onStateChanged = { syncView() }
         FitKeyStore.addListener(settingsListener)
@@ -128,13 +128,12 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
             autoCorrect = !addressLike && !noSuggest && !numeric,
             autoCap = (flags and InputType.TYPE_TEXT_FLAG_CAP_SENTENCES) != 0,
             numeric = numeric,
+            // 앱이 '배우지 말라'고 한 칸 (브라우저 시크릿 모드 등)
+            incognito = (info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0,
         )
         // 비밀번호·주소 칸은 영어로 시작, 나머지는 마지막에 쓰던 언어
         val startLang = if (secret || addressLike) Lang.EN else FitKeyStore.lastLang(this)
         engine.startInput(field, keepLang = false, startLang = startLang)
-        if ((info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0) {
-            engine.settings = engine.settings.copy(learn = false)
-        }
         view?.enterLabel = enterLabel(info)
         secretField = secret
         // 비밀번호 칸에서도 클립보드(비밀번호 관리 앱에서 복사한 것)는 붙여 넣을 수 있게 위 줄을 보여 주되, 내용은 가린다
@@ -163,6 +162,9 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         if (engine.currentText.isNotEmpty() && (newSelStart != newSelEnd || candidatesEnd < 0 || newSelEnd != candidatesEnd)) {
             engine.resetWord(finish = true)
+        } else if (engine.currentText.isEmpty()) {
+            // 낱말을 치는 중이 아니면 커서 앞 낱말로 '다음에 올 말'을 다시 맞춘다
+            engine.onSelectionChanged(newSelStart != newSelEnd)
         }
     }
 
@@ -225,8 +227,8 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
         }
     }
 
-    /** 클립보드 최근 기록: (붙여 넣을 글, 비밀 글인지). 1시간 넘게 지난 것은 보여 주지 않는다 */
-    private fun clipText(): Pair<String, Boolean>? = runCatching {
+    /** 클립보드 최근 기록: (붙여 넣을 글, 비밀 글인지, 복사한 때). 1시간 넘게 지난 것은 보여 주지 않는다 */
+    private fun clipText(): Triple<String, Boolean, Long>? = runCatching {
         val cm = clipboard ?: return null
         val desc = cm.primaryClipDescription ?: return null
         if (System.currentTimeMillis() - desc.timestamp > 60 * 60_000L) return null
@@ -235,7 +237,7 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
         val t = clip.getItemAt(0)?.coerceToText(this)?.toString()?.trim().orEmpty()
         if (t.isEmpty()) return null
         val sensitive = android.os.Build.VERSION.SDK_INT >= 33 && desc.extras?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true
-        t to sensitive
+        Triple(t, sensitive, desc.timestamp)
     }.getOrNull()
 
     /** 위 줄 다시 그리기: 인증번호가 있으면 인증번호, 없으면 클립보드 최근 기록 */
@@ -245,7 +247,12 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
         v.otp = o?.code
         // 인증번호는 5분이 지나면 저절로 사라지게
         if (o != null) v.postDelayed({ refreshTopBar() }, (o.at + OtpStore.VALID_MS - System.currentTimeMillis()).coerceAtLeast(1000))
-        v.clip = clipText()?.let { (t, sensitive) -> if (sensitive || secretField) "●●●●●● 붙여넣기" else t.take(60) }
+        val clip = clipText()
+        v.clip = clip?.let { (t, sensitive) -> if (sensitive || secretField) "●●●●●● 붙여넣기" else t.take(60) }
+        // 방금(2분 안에) 복사한 것은 '다음에 올 말' 예측보다 앞에 보여 준다
+        val age = clip?.let { System.currentTimeMillis() - it.third } ?: Long.MAX_VALUE
+        v.clipFresh = age < CLIP_FRESH_MS
+        if (v.clipFresh) v.postDelayed({ refreshTopBar() }, (CLIP_FRESH_MS - age).coerceAtLeast(1000))
     }
 
     /** 스페이스바를 옆으로 밀면 한/영 바꾸기 */
@@ -270,11 +277,6 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
         if (done) FitKeyStore.saveSettings(this, FitKeyStore.settings(this).copy(height = height, width = width, align = align, bottomGap = gap))
     }
 
-    /** 한 손 모드: 빈 쪽을 누르면 키보드를 그쪽으로 옮기고 기억한다 */
-    override fun onSideTap(side: Int) {
-        FitKeyStore.saveSettings(this, FitKeyStore.settings(this).copy(align = side.toFloat()))
-    }
-
     override fun onLangLongPress() {
         // 다른 키보드(예: 삼성 키보드)로 바로 바꿀 수 있게
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
@@ -293,6 +295,7 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
             v.showStrip = true
         }
 
+        private const val CLIP_FRESH_MS = 2 * 60_000L
         private val SYM1 = KeyboardLayout.symbols(1)
         private val SYM2 = KeyboardLayout.symbols(2)
     }

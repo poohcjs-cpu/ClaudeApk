@@ -41,8 +41,6 @@ class KeyboardView(context: Context) : View(context) {
         fun onCursorMove(steps: Int) {}
         /** 한/영 글쇠 길게: 다른 키보드로 바꾸기 */
         fun onLangLongPress() {}
-        /** 한 손 모드에서 빈 쪽을 누름: 키보드를 그쪽으로 옮기기 (-1 왼쪽, 1 오른쪽) */
-        fun onSideTap(side: Int) {}
         /** 스페이스바를 옆으로 밀기: 한/영 바꾸기 */
         fun onSpaceSwipe(dir: Int) {}
         /** 크기·위치 조절 중 (done: '확인'을 눌러 끝냄) */
@@ -81,6 +79,8 @@ class KeyboardView(context: Context) : View(context) {
     var toolbar = false; set(v) { field = v; invalidate() }
     /** 클립보드 최근 기록 (보여 줄 글, 비밀 글이면 가린 글) */
     var clip: String? = null; set(v) { field = v; invalidate() }
+    /** 클립보드 기록이 방금(2분 안) 복사한 것인지: 그러면 '다음에 올 말' 예측보다 앞에 보여 준다 */
+    var clipFresh = false; set(v) { field = v; invalidate() }
     /** 알림으로 온 인증번호 (보여 줄 때만) */
     var otp: String? = null; set(v) { field = v; invalidate() }
     private val chipRect = RectF()
@@ -144,7 +144,6 @@ class KeyboardView(context: Context) : View(context) {
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
         if (showStrip) drawStrip(canvas)
         for (k in layout.keys) drawKey(canvas, k)
-        drawSideHandle(canvas)
         offsets?.let { drawOffsets(canvas, it) }
         if (adjusting) { drawAdjust(canvas); return }
         pressed.firstOrNull { it.kind == KeyKind.LETTER || it.kind == KeyKind.DIGIT || it.kind == KeyKind.SYMBOL }?.let { drawPreview(canvas, it) }
@@ -231,8 +230,13 @@ class KeyboardView(context: Context) : View(context) {
         else -> k.text ?: ""
     }
 
+    /** 위 줄에 추천 대신 도구 줄(설정·인증번호·클립보드)을 보여 줄지 */
+    private val showTopBar: Boolean
+        get() = toolbar && stripHint.isEmpty() &&
+            (suggestions.items.isEmpty() || suggestions.predicted && (otp != null || clipFresh && clip != null))
+
     private fun drawStrip(c: Canvas) {
-        val items = suggestions.items
+        val items = if (showTopBar) emptyList() else suggestions.items
         text.typeface = Typeface.DEFAULT
         if (adjusting) {
             text.textSize = 13 * sp; text.color = sub
@@ -324,20 +328,6 @@ class KeyboardView(context: Context) : View(context) {
             c.drawLine(cx, cy, tx, ty, paint)
             c.drawCircle(tx, ty, 4 * dp, paint)
         }
-    }
-
-    /** 한 손 모드: 빈 쪽에 '이쪽으로 옮기기' 화살표 */
-    private fun sideSpace(): Pair<Float, Float> = left to (width - (left + areaW))
-
-    private fun drawSideHandle(c: Canvas) {
-        if (widthScale > 0.92f) return
-        val (l, r) = sideSpace()
-        val top = stripH
-        val bottom = stripH + layout.rows * rowH
-        text.textSize = 26 * sp; text.color = sub; text.typeface = Typeface.DEFAULT
-        val cy = (top + bottom) / 2 - (text.descent() + text.ascent()) / 2
-        if (l > 24 * dp) c.drawText("‹", l / 2, cy, text)
-        if (r > 24 * dp) c.drawText("›", width - r / 2, cy, text)
     }
 
     // ── 크기·위치 조절 (삼성 키보드처럼 손잡이를 끌어서) ──────────
@@ -496,12 +486,6 @@ class KeyboardView(context: Context) : View(context) {
 
     private fun down(id: Int, x: Float, y: Float) {
         if (y < stripH) { stripDown = id; return }
-        // 한 손 모드의 빈 쪽을 누르면 키보드를 그쪽으로
-        if (widthScale <= 0.92f && y < stripH + layout.rows * rowH) {
-            val (l, r) = sideSpace()
-            if (x < left && l > 24 * dp) { listener?.onSideTap(-1); return }
-            if (x > left + areaW && r > 24 * dp) { listener?.onSideTap(1); return }
-        }
         // 빠르게 겹쳐 치기: 앞 손가락을 떼기 전에 다음 글쇠를 누르면 앞 글쇠를 먼저 낸다
         for ((pid, p) in ptrs.entries.toList()) {
             if (p.key.kind != KeyKind.BACKSPACE && p.key.kind != KeyKind.SPACE && !p.longFired) {
@@ -509,7 +493,8 @@ class KeyboardView(context: Context) : View(context) {
                 listener?.onKey(p.key, p.ux, p.uy)
             }
         }
-        val ux = (x - left) / keyW
+        // 한 손 모드의 빈 쪽을 누르면 가장 가까운 끝 글쇠로 (끝 글쇠를 노리다 조금 넘친 것으로 본다)
+        val ux = ((x - left) / keyW).coerceIn(-0.5f, 10.5f)
         val uy = (y - stripH) / rowH
         val key = hitTest(layout, ux, uy) ?: return
         ptrs[id] = Ptr(key, ux, uy, x)
@@ -549,8 +534,8 @@ class KeyboardView(context: Context) : View(context) {
     private fun up(id: Int, x: Float, y: Float) {
         if (id == stripDown) {
             stripDown = -1
-            if (y < stripH && suggestions.items.isNotEmpty()) listener?.onSuggestion((x / (width / 3f)).toInt().coerceIn(0, suggestions.items.lastIndex))
-            else if (y < stripH && toolbar && stripHint.isEmpty()) {
+            if (y < stripH && !showTopBar && suggestions.items.isNotEmpty()) listener?.onSuggestion((x / (width / 3f)).toInt().coerceIn(0, suggestions.items.lastIndex))
+            else if (y < stripH && showTopBar) {
                 when {
                     x <= gearRect.right + 8 * dp -> listener?.onToolbar("settings")
                     !chipRect.isEmpty && x >= chipRect.left - 8 * dp -> listener?.onToolbar(if (otp != null) "otp" else "clip")

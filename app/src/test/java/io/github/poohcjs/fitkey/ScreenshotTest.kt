@@ -69,7 +69,10 @@ class ScreenshotTest {
         t.clear()
     }
 
-    @Test fun oneHanded() = save("8_one_hand", keyboard { widthScale = 0.78f; align = 1f; bottomGap = 24 })
+    @Test fun oneHanded() = save("8_one_hand", keyboard {
+        widthScale = 0.8f; align = 1f; bottomGap = 24; toolbar = true
+        suggestions = SuggestionBar(listOf(Suggestion("저녁", "wjsur", false), Suggestion("날씨", "skfTl", false), Suggestion("뭐", "anj", false)), null, predicted = true)
+    })
 
     @Test fun calibrationScreen() = activityShot("9_calibrate", "calibrate")
 

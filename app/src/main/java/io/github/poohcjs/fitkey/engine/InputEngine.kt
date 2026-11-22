@@ -29,11 +29,19 @@ data class FieldInfo(
     val autoCap: Boolean = false,
     /** 숫자 칸 */
     val numeric: Boolean = false,
+    /** 앱이 '배우지 말라'고 한 칸 (시크릿 모드 등): 배우지도, 배운 것을 보여 주지도 않는다 */
+    val incognito: Boolean = false,
 )
 
 data class Suggestion(val word: String, val key: String?, val isTyped: Boolean)
 
-data class SuggestionBar(val items: List<Suggestion> = emptyList(), /** 스페이스를 누르면 들어갈 항목 */ val autoIndex: Int? = null)
+data class SuggestionBar(
+    val items: List<Suggestion> = emptyList(),
+    /** 스페이스를 누르면 들어갈 항목 */
+    val autoIndex: Int? = null,
+    /** 띄어 쓴 뒤 '다음에 올 말' 예측 (내가 이어 쓰던 말에서 배운 것) */
+    val predicted: Boolean = false,
+)
 
 /** 사용자 설정 중 입력에 영향을 주는 것 */
 data class EngineSettings(val autoCorrect: Boolean = true, val learn: Boolean = true, val suggestions: Boolean = true)
@@ -48,6 +56,8 @@ class InputEngine(
     val userWords: UserWords,
     private val dicts: (Lang) -> Dictionary?,
     private val clock: () -> Long = { System.currentTimeMillis() },
+    /** 내가 이어 쓰는 낱말 순서 (다음 낱말 예측) */
+    val bigrams: UserBigrams = UserBigrams(),
 ) {
     var lang = Lang.KO
         private set
@@ -74,10 +84,12 @@ class InputEngine(
     /** 낱말을 확정한 뒤 배울 것 (자동 고친 말은 되돌리지 않았을 때만 배운다) */
     private var pendingLearn: (() -> Unit)? = null
     private var lastShiftTap = 0L
+    /** 지금 치는 낱말 바로 앞 낱말의 글쇠 (그 낱말 뒤에 한 칸 띄우고 치기 시작했을 때) */
+    private var context: String? = null
 
     val currentText: String get() = composing
     val suggestions: SuggestionBar get() = bar
-    private val canLearn get() = settings.learn && !field.secret
+    private val canLearn get() = settings.learn && !field.secret && !field.incognito
     private val canCorrect get() = settings.autoCorrect && field.autoCorrect && !field.secret
 
     fun startInput(info: FieldInfo, keepLang: Boolean = true, startLang: Lang? = null) {
@@ -115,6 +127,7 @@ class InputEngine(
             if (canLearn && clock() - at < 2500 && d.key.letter != l && dx * dx + dy * dy < 0.85f * 0.85f) touch.learn(key, d.ux, d.uy, 2f)
         }
         deleted = null
+        if (word.isEmpty()) context = contextKey()
         val shifted = shift != ShiftState.OFF
         val stroke = when (lang) {
             Lang.KO -> {
@@ -168,6 +181,8 @@ class InputEngine(
         }
         deleted = null
         sink.sendBackspace()
+        // 앞 글을 지우면 예측은 거둔다 (지운 뒤 커서가 자리 잡으면 onSelectionChanged가 다시 계산)
+        if (bar.items.isNotEmpty()) { bar = SuggestionBar(); onSuggestions(bar) }
         refreshAutoCap()
         onStateChanged()
     }
@@ -192,6 +207,8 @@ class InputEngine(
     fun onEnter() {
         finishWord("", correct = false)
         sink.enter()
+        // 새 줄은 새 문장: 예측을 거둔다
+        if (bar.items.isNotEmpty()) { bar = SuggestionBar(); onSuggestions(bar) }
         refreshAutoCap()
         onStateChanged()
     }
@@ -200,13 +217,27 @@ class InputEngine(
     fun onSuggestion(index: Int) {
         val s = bar.items.getOrNull(index) ?: return
         val strokes = word.toList()
-        if (strokes.isEmpty()) return
+        if (strokes.isEmpty()) {
+            // 띄어 쓴 뒤 '다음에 올 말'을 누름
+            if (!bar.predicted) return
+            val ctx = contextKey()
+            runPendingLearn()
+            sink.commit(s.word + " ")
+            if (canLearn) s.key?.let { k -> userWords.add(lang, k); ctx?.let { bigrams.add(lang, it, k) } }
+            lastCorrection = null; deleted = null
+            refreshAutoCap()
+            updateSuggestions()
+            onStateChanged()
+            return
+        }
+        val ctx = context
         runPendingLearn()
         sink.commit(s.word + " ")
         if (canLearn) {
             val k = s.key ?: Decoder.keysOf(strokes)
             userWords.add(lang, k, if (s.isTyped) 2 else 1)
             learnWord(strokes, k, 1.2f)
+            ctx?.let { bigrams.add(lang, it, k) }
         }
         word.clear(); composing = ""; lastCorrection = null; deleted = null
         refreshAutoCap()
@@ -217,10 +248,11 @@ class InputEngine(
     private fun finishWord(suffix: String, correct: Boolean) {
         val strokes = word.toList()
         val typed = composing
+        val ctx = context
         lastCorrection = null
         runPendingLearn()
         if (strokes.isEmpty()) {
-            if (suffix.isNotEmpty()) sink.commit(suffix)
+            if (suffix.isNotEmpty()) { sink.commit(suffix); updateSuggestions() }
             return
         }
         val fix = if (correct && canCorrect) decoder.autoCorrect(strokes, typed, lang, dicts(lang), userWords, layout) else null
@@ -233,6 +265,7 @@ class InputEngine(
                 if (canLearn) {
                     learnWord(strokes, fix.toKey, 1.5f)
                     userWords.add(lang, fix.toKey)
+                    ctx?.let { bigrams.add(lang, it, fix.toKey) }
                 }
             }
         } else {
@@ -242,6 +275,7 @@ class InputEngine(
                 val dict = dicts(lang)
                 val known = dict?.count(key)?.let { it > 0 } == true || userWords.count(lang, key) > 0
                 userWords.add(lang, key)
+                ctx?.let { bigrams.add(lang, it, key) }
                 // 아는 말이면 각 터치가 그 글쇠였다고 조금 배운다
                 if (known) learnWord(strokes, key, 0.3f)
             }
@@ -311,10 +345,64 @@ class InputEngine(
         shift = if (start) ShiftState.ONCE else if (shift == ShiftState.ONCE && word.isEmpty()) ShiftState.OFF else shift
     }
 
+    /** 커서·선택이 바뀜 (사용자가 옮겼거나 앱이 글을 바꿈): 낱말을 치는 중이 아니면 예측을 다시 */
+    fun onSelectionChanged(hasSelection: Boolean) {
+        if (word.isNotEmpty()) return
+        if (hasSelection) {
+            if (bar.items.isNotEmpty()) { bar = SuggestionBar(); onSuggestions(bar) }
+        } else {
+            val old = bar
+            updateSuggestions(notifyIfSame = false, old = old)
+        }
+    }
+
+    // ── 다음 낱말 예측 ─────────────────────────────────────
+    /**
+     * 커서 바로 앞 낱말의 글쇠: 그 낱말 뒤에 한 칸만 띄웠을 때만 (문장부호·줄바꿈 뒤는 새 문장으로 본다).
+     * 입력칸의 글을 읽으므로, 커서를 옮겼거나 자동으로 고친 뒤에도 실제 앞 낱말을 쓴다.
+     */
+    private fun contextKey(): String? {
+        if (field.secret) return null
+        val n = 40
+        val before = sink.textBefore(n) ?: return null
+        if (before.length < 2 || before.last() != ' ') return null
+        val body = before.dropLast(1)
+        val w = body.takeLastWhile { it.isLetter() || it == '\'' || it == '’' }
+        if (w.isEmpty() || w.length > 30) return null
+        val start = body.length - w.length
+        if (start == 0 && before.length >= n) return null   // 낱말이 잘렸을 수 있다
+        if (start > 0 && !body[start - 1].isWhitespace() && body[start - 1] !in "\"“‘(['") return null
+        return when (lang) {
+            Lang.KO -> Hangul.toKeys(w)?.takeIf { it.isNotEmpty() }
+            Lang.EN -> w.filter { it != '\'' && it != '’' }.lowercase().takeIf { k -> k.isNotEmpty() && k.all { it in 'a'..'z' } }
+        }
+    }
+
+    private fun wordOf(key: String): String = dicts(lang)?.wordOf(key) ?: when (lang) {
+        Lang.KO -> Hangul.composeKeys(key)
+        Lang.EN -> Dictionary.CONTRACTIONS[key] ?: key
+    }
+
+    /** 띄어 쓴 뒤: 앞 낱말 다음에 내가 자주 쓴 말 (두 번 넘게 쓴 것만) */
+    private fun predictions(): SuggestionBar {
+        if (!settings.suggestions || field.secret || field.incognito) return SuggestionBar()
+        val ctx = contextKey() ?: return SuggestionBar()
+        val items = bigrams.next(lang, ctx, max = 3).map { Suggestion(wordOf(it.first), it.first, false) }.distinctBy { it.word }
+        if (items.isEmpty()) return SuggestionBar()
+        // 가장 자주 쓴 말을 가운데에
+        val ordered = if (items.size == 3) listOf(items[1], items[0], items[2]) else items
+        return SuggestionBar(ordered, null, predicted = true)
+    }
+
     // ── 추천 낱말 ──────────────────────────────────────────
-    private fun updateSuggestions() {
+    private fun updateSuggestions(notifyIfSame: Boolean = true, old: SuggestionBar? = null) {
         val dict = dicts(lang)
-        if (word.isEmpty() || !settings.suggestions || field.secret || dict == null) {
+        if (word.isEmpty()) {
+            bar = predictions()
+            if (notifyIfSame || bar != old) onSuggestions(bar)
+            return
+        }
+        if (!settings.suggestions || field.secret || dict == null) {
             bar = SuggestionBar(); onSuggestions(bar); return
         }
         val key = Decoder.keysOf(word)
@@ -324,12 +412,15 @@ class InputEngine(
 
         val fix = if (canCorrect && word.size >= 2) decoder.autoCorrect(word, typed, lang, dict, userWords, layout) else null
         val corrections = decoder.candidates(word, lang, dict, userWords, layout).filter { it.key != key }.take(2)
-        val completions = (userWords.completions(lang, key, 2) + dict.completions(key, 4))
+        // 앞 낱말 다음에 내가 쓰던 말이 지금 친 글쇠로 시작하면 먼저 (한 번 쓴 것도)
+        val following = if (field.incognito) emptyList() else context?.let { bigrams.next(lang, it, prefix = key, max = 2, min = 1) }.orEmpty()
+        val completions = (following + userWords.completions(lang, key, 2) + dict.completions(key, 4))
             .filter { it.first != key }.distinctBy { it.first }
         // 가운데: 스페이스를 누르면 들어갈 말 (고칠 말이 있으면 그 말, 아니면 친 그대로)
         val center = fix?.let { Suggestion(it.to, it.toKey, false) } ?: Suggestion(typed, key, true)
         val left = if (fix != null) Suggestion(typed, key, true) else null
-        val others = corrections.map { Suggestion(Decoder.matchCase(it.word, typed, lang), it.key, false) } +
+        val others = following.filter { it.first != key }.map { Suggestion(Decoder.matchCase(dict.wordOf(it.first), typed, lang), it.first, false) } +
+            corrections.map { Suggestion(Decoder.matchCase(it.word, typed, lang), it.key, false) } +
             completions.map { Suggestion(Decoder.matchCase(dict.wordOf(it.first), typed, lang), it.first, false) }
         val list = ArrayList<Suggestion>()
         left?.let { list += it }

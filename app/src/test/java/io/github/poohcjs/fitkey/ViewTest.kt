@@ -8,6 +8,8 @@ import android.view.View
 import androidx.test.core.app.ApplicationProvider
 import io.github.poohcjs.fitkey.engine.Key
 import io.github.poohcjs.fitkey.engine.KeyKind
+import io.github.poohcjs.fitkey.engine.Suggestion
+import io.github.poohcjs.fitkey.engine.SuggestionBar
 import io.github.poohcjs.fitkey.ime.KeyboardView
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -31,6 +33,7 @@ class ViewTest {
             override fun onCursorMove(steps: Int) { events += "cursor:$steps" }
             override fun onAdjust(height: Float, width: Float, align: Float, gap: Int, done: Boolean) { events += "adjust:$done" }
             override fun onToolbar(action: String) { events += "bar:$action" }
+            override fun onSuggestion(index: Int) { events += "sug:$index" }
         }
         measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
         layout(0, 0, measuredWidth, measuredHeight)
@@ -104,5 +107,37 @@ class ViewTest {
         view.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(1200, view.measuredHeight, android.graphics.Bitmap.Config.ARGB_8888)))
         ev(MotionEvent.ACTION_DOWN, 1100f, strip / 2); ev(MotionEvent.ACTION_UP, 1100f, strip / 2)
         assertEquals(listOf("bar:clip", "bar:settings", "bar:otp"), events)
+    }
+
+    private fun drawNow() = view.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(1200, view.measuredHeight, android.graphics.Bitmap.Config.ARGB_8888)))
+    private fun tap(x: Float, y: Float) { ev(MotionEvent.ACTION_DOWN, x, y); ev(MotionEvent.ACTION_UP, x, y) }
+
+    /** 한 손 모드에서 빈 쪽을 눌러도 키보드가 옮겨지지 않고, 가장 가까운 끝 글쇠가 쳐진다 */
+    @Test fun oneHandEmptySideTypesNearestKey() {
+        view.widthScale = 0.8f
+        view.align = 1f
+        drawNow()
+        val q = view.layout.keyOf('q')!!
+        val l = view.layout.keyOf('l')!!
+        tap(60f, strip + q.cy * rowH)
+        // 오른쪽으로 모으면 오른쪽 끝은 그대로 l 자리
+        tap(1188f, strip + l.cy * rowH)
+        assertEquals(listOf("key:${q.id}", "key:${l.id}"), events)
+    }
+
+    /** 띄어 쓴 뒤 예측은 인증번호·방금 복사한 것에 자리를 내준다 (치는 중 추천은 그대로) */
+    @Test fun predictionsGiveWayToOtpAndFreshClip() {
+        view.toolbar = true
+        view.suggestions = SuggestionBar(listOf(Suggestion("날씨", "skfTl", false)), null, predicted = true)
+        drawNow(); tap(100f, strip / 2)                   // 예측을 누름
+        view.clip = "부산 해운대구"
+        drawNow(); tap(100f, strip / 2)                   // 오래된 클립보드보다 예측이 앞
+        view.clipFresh = true
+        drawNow(); tap(1100f, strip / 2)                  // 방금 복사한 것은 예측보다 앞
+        view.clip = null; view.clipFresh = false; view.otp = "482915"
+        drawNow(); tap(1100f, strip / 2)                  // 인증번호도 예측보다 앞
+        view.suggestions = SuggestionBar(listOf(Suggestion("날", "skf", true)), 0)
+        drawNow(); tap(100f, strip / 2)                   // 낱말을 치는 중이면 추천이 앞
+        assertEquals(listOf("sug:0", "sug:0", "bar:clip", "bar:otp", "sug:0"), events)
     }
 }

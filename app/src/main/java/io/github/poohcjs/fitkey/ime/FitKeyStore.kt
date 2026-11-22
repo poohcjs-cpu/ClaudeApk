@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import io.github.poohcjs.fitkey.engine.Dictionary
 import io.github.poohcjs.fitkey.engine.Lang
 import io.github.poohcjs.fitkey.engine.TouchModel
+import io.github.poohcjs.fitkey.engine.UserBigrams
 import io.github.poohcjs.fitkey.engine.UserWords
 import java.io.File
 import java.util.zip.GZIPInputStream
@@ -35,11 +36,14 @@ data class KeySettings(
 object FitKeyStore {
     val touch = TouchModel()
     val userWords = UserWords()
+    /** 내가 이어 쓰는 낱말 순서 (다음 낱말 예측) */
+    val bigrams = UserBigrams()
     @Volatile private var ko: Dictionary? = null
     @Volatile private var en: Dictionary? = null
     private var app: Context? = null
     private var savedTouch = -1
     private var savedWords = -1
+    private var savedPairs = -1
     private val listeners = mutableListOf<() -> Unit>()
 
     fun init(context: Context) {
@@ -48,8 +52,10 @@ object FitKeyStore {
         app = c
         runCatching { touchFile(c).takeIf { it.exists() }?.readText()?.let { touch.load(it) } }
         runCatching { wordsFile(c).takeIf { it.exists() }?.readText()?.let { userWords.load(it) } }
+        runCatching { pairsFile(c).takeIf { it.exists() }?.readText()?.let { bigrams.load(it) } }
         savedTouch = touch.version
         savedWords = userWords.version
+        savedPairs = bigrams.version
         // 사전은 크니 따로 읽는다 (읽는 동안에도 입력은 된다: 추천·고치기만 잠시 없음)
         Thread {
             ko = load(c, Lang.KO)
@@ -111,11 +117,16 @@ object FitKeyStore {
             runCatching { write(wordsFile(c), userWords.serialize()) }
             savedWords = userWords.version
         }
+        if (bigrams.version != savedPairs) {
+            runCatching { write(pairsFile(c), bigrams.serialize()) }
+            savedPairs = bigrams.version
+        }
     }
 
     fun clearLearning() {
         touch.clear()
         userWords.clear()
+        bigrams.clear()
         save()
         app?.let { prefs(it).edit().putInt("calibrations", 0).apply() }
     }
@@ -128,4 +139,5 @@ object FitKeyStore {
 
     private fun touchFile(c: Context) = File(c.filesDir, "touch.txt")
     private fun wordsFile(c: Context) = File(c.filesDir, "words.txt")
+    private fun pairsFile(c: Context) = File(c.filesDir, "pairs.txt")
 }
