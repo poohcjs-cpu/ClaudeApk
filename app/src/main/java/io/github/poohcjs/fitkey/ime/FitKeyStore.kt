@@ -27,7 +27,24 @@ data class KeySettings(
     val bottomGap: Int = 0,
     /** 스페이스바를 옆으로 밀어 한/영 바꾸기 (끄면 밀어서 커서 이동) */
     val spaceSwipeLang: Boolean = true,
-)
+    /** 스페이스를 빠르게 두 번 누르면 마침표 */
+    val doubleSpacePeriod: Boolean = true,
+    /** 길게 누르기 시간: 0 짧게, 1 보통, 2 길게 */
+    val longPress: Int = 1,
+    /** 진동 세기: 1 약하게, 2 보통, 3 강하게 (끄기는 vibrate = false) */
+    val vibeLevel: Int = 1,
+    /** 누를 때 소리 (무음·진동 모드에서는 나지 않는다) */
+    val sound: Boolean = false,
+    /** 키보드 색: 0 휴대폰 설정 따라, 1 밝게, 2 어둡게 */
+    val theme: Int = 0,
+    /** 누른 글자를 글쇠 위에 크게 보여 주기 */
+    val preview: Boolean = true,
+    /** 글쇠 오른쪽 위에 길게 누르면 나오는 기호 표시 */
+    val hints: Boolean = true,
+) {
+    /** 길게 누르기 시간 (밀리초) */
+    val longPressMs: Long get() = when (longPress) { 0 -> 280L; 2 -> 550L; else -> 380L }
+}
 
 /**
  * 키보드(서비스)와 설정 앱(화면)이 함께 쓰는 저장소. 같은 앱 프로세스 안에서 하나만 있다.
@@ -79,6 +96,9 @@ object FitKeyStore {
             autoCorrect = p.getBoolean("autoCorrect", true), suggestions = p.getBoolean("suggestions", true), learn = p.getBoolean("learn", true),
             width = p.getFloat("width", 1.0f), align = p.getFloat("align", 0f), bottomGap = p.getInt("bottomGap", 0),
             spaceSwipeLang = p.getBoolean("spaceSwipeLang", true),
+            doubleSpacePeriod = p.getBoolean("doubleSpacePeriod", true), longPress = p.getInt("longPress", 1),
+            vibeLevel = p.getInt("vibeLevel", 1), sound = p.getBoolean("sound", false), theme = p.getInt("theme", 0),
+            preview = p.getBoolean("preview", true), hints = p.getBoolean("hints", true),
         )
     }
 
@@ -92,7 +112,10 @@ object FitKeyStore {
         prefs(c).edit().putFloat("height", s.height).putBoolean("numberRow", s.numberRow).putBoolean("vibrate", s.vibrate)
             .putBoolean("autoCorrect", s.autoCorrect).putBoolean("suggestions", s.suggestions).putBoolean("learn", s.learn)
             .putFloat("width", s.width).putFloat("align", s.align).putInt("bottomGap", s.bottomGap)
-            .putBoolean("spaceSwipeLang", s.spaceSwipeLang).apply()
+            .putBoolean("spaceSwipeLang", s.spaceSwipeLang)
+            .putBoolean("doubleSpacePeriod", s.doubleSpacePeriod).putInt("longPress", s.longPress).putInt("vibeLevel", s.vibeLevel)
+            .putBoolean("sound", s.sound).putInt("theme", s.theme).putBoolean("preview", s.preview).putBoolean("hints", s.hints)
+            .apply()
         listeners.toList().forEach { it() }
     }
 

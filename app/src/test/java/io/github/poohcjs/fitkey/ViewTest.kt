@@ -100,12 +100,13 @@ class ViewTest {
         view.toolbar = true
         view.clip = "부산 해운대구 우동 123"
         view.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(1200, view.measuredHeight, android.graphics.Bitmap.Config.ARGB_8888)))
-        // 설정은 왼쪽 끝, 클립보드·인증번호는 오른쪽
-        ev(MotionEvent.ACTION_DOWN, 1100f, strip / 2); ev(MotionEvent.ACTION_UP, 1100f, strip / 2)
+        // 설정은 왼쪽 끝, 붙여넣기·인증번호는 가운데 (오른쪽 끝 빈 곳은 아무 일 없음)
+        ev(MotionEvent.ACTION_DOWN, 600f, strip / 2); ev(MotionEvent.ACTION_UP, 600f, strip / 2)
         ev(MotionEvent.ACTION_DOWN, 50f, strip / 2); ev(MotionEvent.ACTION_UP, 50f, strip / 2)
+        ev(MotionEvent.ACTION_DOWN, 1190f, strip / 2); ev(MotionEvent.ACTION_UP, 1190f, strip / 2)
         view.otp = "482915"
         view.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(1200, view.measuredHeight, android.graphics.Bitmap.Config.ARGB_8888)))
-        ev(MotionEvent.ACTION_DOWN, 1100f, strip / 2); ev(MotionEvent.ACTION_UP, 1100f, strip / 2)
+        ev(MotionEvent.ACTION_DOWN, 600f, strip / 2); ev(MotionEvent.ACTION_UP, 600f, strip / 2)
         assertEquals(listOf("bar:clip", "bar:settings", "bar:otp"), events)
     }
 
@@ -131,9 +132,9 @@ class ViewTest {
         view.suggestions = SuggestionBar(listOf(Suggestion("날씨", "skfTl", false)), null, predicted = true)
         drawNow(); tap(100f, strip / 2)                   // 예측을 누름
         view.clip = "부산 해운대구"
-        drawNow(); tap(1100f, strip / 2)                  // 방금 복사한 글은 예측보다 앞
+        drawNow(); tap(600f, strip / 2)                  // 방금 복사한 글은 예측보다 앞
         view.clip = null; view.otp = "482915"
-        drawNow(); tap(1100f, strip / 2)                  // 인증번호도 예측보다 앞
+        drawNow(); tap(600f, strip / 2)                  // 인증번호도 예측보다 앞
         view.suggestions = SuggestionBar(listOf(Suggestion("날", "skf", true)), 0)
         drawNow(); tap(100f, strip / 2)                   // 낱말을 치는 중이면 추천이 앞
         assertEquals(listOf("sug:0", "bar:clip", "bar:otp", "sug:0"), events)

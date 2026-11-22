@@ -72,6 +72,18 @@ class KeyboardView(context: Context) : View(context) {
     /** 키보드 아래 여백 (dp): 키보드를 위로 올린다 */
     var bottomGap = 0; set(v) { field = v.coerceIn(0, 120); requestLayout() }
     var vibrate = true
+    /** 진동 세기: 1 약하게, 2 보통, 3 강하게 */
+    var vibeLevel = 1
+    /** 누를 때 소리 */
+    var sound = false
+    /** 키보드 색: 0 휴대폰 설정 따라, 1 밝게, 2 어둡게 */
+    var theme = 0; set(v) { field = v; invalidate() }
+    /** 누른 글자를 크게 보여 주기 */
+    var preview = true
+    /** 길게 누르면 나오는 기호를 글쇠에 표시 */
+    var hints = true; set(v) { field = v; invalidate() }
+    /** 길게 누르기 시간 (밀리초) */
+    var longPressMs = 380L
     var bottomInset = 0; set(v) { field = v; requestLayout() }
     /** 스페이스바를 옆으로 밀면 한/영 바꾸기 (끄면 밀어서 커서 옮기기) */
     var spaceSwipeLang = true; set(v) { field = v; invalidate() }
@@ -96,7 +108,11 @@ class KeyboardView(context: Context) : View(context) {
 
     private val dp = resources.displayMetrics.density
     private val sp = resources.displayMetrics.scaledDensity.coerceAtMost(dp * 1.2f)
-    private val dark get() = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    private val dark get() = when (theme) {
+        1 -> false
+        2 -> true
+        else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    }
 
     private val stripH get() = if (showStrip) 44 * dp else 0f
     private val rowH get() = 50 * dp * heightScale
@@ -144,7 +160,7 @@ class KeyboardView(context: Context) : View(context) {
         for (k in layout.keys) drawKey(canvas, k)
         offsets?.let { drawOffsets(canvas, it) }
         if (adjusting) { drawAdjust(canvas); return }
-        pressed.firstOrNull { it.kind == KeyKind.LETTER || it.kind == KeyKind.DIGIT || it.kind == KeyKind.SYMBOL }?.let { drawPreview(canvas, it) }
+        if (preview) pressed.firstOrNull { it.kind == KeyKind.LETTER || it.kind == KeyKind.DIGIT || it.kind == KeyKind.SYMBOL }?.let { drawPreview(canvas, it) }
     }
 
     private fun keyRect(k: Key, out: RectF) {
@@ -204,7 +220,7 @@ class KeyboardView(context: Context) : View(context) {
         c.drawText(label, rect.centerX(), cy, text)
         // 길게 누르면 나오는 글자: 오른쪽 위에 작게
         val hint = k.longPress
-        if (hint != null && mode == Mode.LETTERS && k.kind == KeyKind.LETTER) {
+        if (hints && hint != null && mode == Mode.LETTERS && k.kind == KeyKind.LETTER) {
             text.textSize = 10 * sp; text.color = sub; text.typeface = Typeface.DEFAULT
             c.drawText(hint, rect.right - 7 * dp, rect.top + 12 * dp, text)
         }
@@ -254,6 +270,15 @@ class KeyboardView(context: Context) : View(context) {
         items.forEachIndexed { i, s ->
             val auto = i == suggestions.autoIndex
             val likely = i == suggestions.likelyIndex
+            val touching = stripDown >= 0 && stripPressX >= 0 && (stripPressX / cellW).toInt().coerceIn(0, items.lastIndex) == i
+            if (auto || likely || touching) {
+                paint.color = when {
+                    touching -> if (dark) 0x40FFFFFF else 0x1F000000
+                    else -> if (dark) 0x332F6BFF else 0x1A2F6BFF
+                }
+                val r = stripH * 0.32f
+                c.drawRoundRect(cellW * i + 6 * dp, stripH / 2 - r, cellW * (i + 1) - 6 * dp, stripH / 2 + r, r, r, paint)
+            }
             text.textSize = 16 * sp
             text.typeface = if (auto) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
             text.color = if (auto || likely) brand else ink
@@ -266,7 +291,7 @@ class KeyboardView(context: Context) : View(context) {
         }
     }
 
-    /** 위 줄: 왼쪽 끝에 설정(덜 씀), 오른쪽에 인증번호(있으면) 또는 방금 복사한 글(엄지가 닿기 쉬운 쪽) */
+    /** 위 줄: 왼쪽 끝에 설정(덜 씀), 가운데에 인증번호(있으면) 또는 방금 복사한 글 */
     private fun drawTopBar(c: Canvas) {
         val gearW = 40 * dp
         gearRect.set(6 * dp, stripH * 0.14f, 6 * dp + gearW, stripH * 0.86f)
@@ -281,16 +306,18 @@ class KeyboardView(context: Context) : View(context) {
         val isOtp = otp != null
         text.textSize = 14.5f * sp
         text.typeface = if (isOtp) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-        val maxW = width - gearRect.right - 18 * dp - 24 * dp
-        val shown = ellipsize(label, maxW)
-        val w = text.measureText(shown) + 24 * dp
-        chipRect.set(width - 10 * dp - w, stripH * 0.16f, width - 10 * dp, stripH * 0.84f)
+        // 설정 단추와 겹치지 않게 양쪽에 같은 여백을 두고 가운데에
+        val side = gearRect.right + 10 * dp
+        val shown = ellipsize(label, width - 2 * side - 28 * dp)
+        val w = text.measureText(shown) + 28 * dp
+        chipRect.set(width / 2f - w / 2, stripH * 0.16f, width / 2f + w / 2, stripH * 0.84f)
         paint.color = if (isOtp) brand else if (dark) 0xFF2A2C32.toInt() else 0xFFD9DDE3.toInt()
+        if (stripDown >= 0 && stripPressX >= chipRect.left - 8 * dp && stripPressX <= chipRect.right + 8 * dp) {
+            paint.color = blend(paint.color, if (dark) Color.WHITE else Color.BLACK, 0.14f)
+        }
         c.drawRoundRect(chipRect, chipRect.height() / 2, chipRect.height() / 2, paint)
         text.color = if (isOtp) Color.WHITE else ink
-        text.textAlign = Paint.Align.LEFT
-        c.drawText(shown, chipRect.left + 12 * dp, chipRect.centerY() - (text.descent() + text.ascent()) / 2, text)
-        text.textAlign = Paint.Align.CENTER
+        c.drawText(shown, chipRect.centerX(), chipRect.centerY() - (text.descent() + text.ascent()) / 2, text)
     }
 
     private fun ellipsize(s: String, max: Float): String {
@@ -460,6 +487,8 @@ class KeyboardView(context: Context) : View(context) {
     /** 길게 누름·지우기 반복 타이머 (화면에 붙어 있는지와 상관없이 같은 방식으로 돈다) */
     private val timers = android.os.Handler(android.os.Looper.getMainLooper())
     private var stripDown = -1
+    /** 위 줄을 누르고 있는 자리 (눌린 표시) */
+    private var stripPressX = -1f
     private val longPress = Runnable { onLongPressTimeout() }
     private val repeatDelete = object : Runnable {
         override fun run() {
@@ -478,13 +507,16 @@ class KeyboardView(context: Context) : View(context) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> down(id, e.getX(i), e.getY(i))
             MotionEvent.ACTION_MOVE -> for (p in 0 until e.pointerCount) move(e.getPointerId(p), e.getX(p))
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> up(id, e.getX(i), e.getY(i))
-            MotionEvent.ACTION_CANCEL -> { ptrs.clear(); pressed.clear(); timers.removeCallbacks(longPress); timers.removeCallbacks(repeatDelete); invalidate() }
+            MotionEvent.ACTION_CANCEL -> {
+                ptrs.clear(); pressed.clear(); stripDown = -1; stripPressX = -1f
+                timers.removeCallbacks(longPress); timers.removeCallbacks(repeatDelete); invalidate()
+            }
         }
         return true
     }
 
     private fun down(id: Int, x: Float, y: Float) {
-        if (y < stripH) { stripDown = id; return }
+        if (y < stripH) { stripDown = id; stripPressX = x; invalidate(); return }
         // 빠르게 겹쳐 치기: 앞 손가락을 떼기 전에 다음 글쇠를 누르면 앞 글쇠를 먼저 낸다
         for ((pid, p) in ptrs.entries.toList()) {
             if (p.key.kind != KeyKind.BACKSPACE && p.key.kind != KeyKind.SPACE && !p.longFired) {
@@ -499,13 +531,14 @@ class KeyboardView(context: Context) : View(context) {
         ptrs[id] = Ptr(key, ux, uy, x)
         pressed += key
         buzz()
+        click(key)
         timers.removeCallbacks(longPress)
         if (key.kind == KeyKind.BACKSPACE) {
             listener?.onBackspace()
             timers.removeCallbacks(repeatDelete)
             timers.postDelayed(repeatDelete, 420)
         } else if (key.longPress != null || key.kind == KeyKind.LANG || key.kind == KeyKind.NUMPAD || key.kind == KeyKind.SPACE) {
-            timers.postDelayed(longPress, if (key.kind == KeyKind.SPACE) 350L else 380L)
+            timers.postDelayed(longPress, if (key.kind == KeyKind.SPACE) minOf(350L, longPressMs) else longPressMs)
         }
         invalidate()
     }
@@ -533,11 +566,13 @@ class KeyboardView(context: Context) : View(context) {
     private fun up(id: Int, x: Float, y: Float) {
         if (id == stripDown) {
             stripDown = -1
+            stripPressX = -1f
+            invalidate()
             if (y < stripH && !showTopBar && suggestions.items.isNotEmpty()) listener?.onSuggestion((x / (width / 3f)).toInt().coerceIn(0, suggestions.items.lastIndex))
             else if (y < stripH && showTopBar) {
                 when {
                     x <= gearRect.right + 8 * dp -> listener?.onToolbar("settings")
-                    !chipRect.isEmpty && x >= chipRect.left - 8 * dp -> listener?.onToolbar(if (otp != null) "otp" else "clip")
+                    !chipRect.isEmpty && x >= chipRect.left - 8 * dp && x <= chipRect.right + 8 * dp -> listener?.onToolbar(if (otp != null) "otp" else "clip")
                 }
             }
             return
@@ -572,9 +607,30 @@ class KeyboardView(context: Context) : View(context) {
     private fun buzz() {
         if (!vibrate) return
         runCatching {
-            if (Build.VERSION.SDK_INT >= 29) vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
-            else vibrator?.vibrate(VibrationEffect.createOneShot(12, 60))
+            if (Build.VERSION.SDK_INT >= 29) {
+                val effect = when (vibeLevel) { 3 -> VibrationEffect.EFFECT_HEAVY_CLICK; 2 -> VibrationEffect.EFFECT_CLICK; else -> VibrationEffect.EFFECT_TICK }
+                vibrator?.vibrate(VibrationEffect.createPredefined(effect))
+            } else {
+                val (ms, amp) = when (vibeLevel) { 3 -> 28L to 220; 2 -> 18L to 140; else -> 12L to 60 }
+                vibrator?.vibrate(VibrationEffect.createOneShot(ms, amp))
+            }
         }
+    }
+
+    private val audio by lazy { context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager }
+
+    /** 누를 때 소리: 휴대폰이 소리 모드일 때만 (무음·진동 모드에서는 내지 않는다) */
+    private fun click(k: Key) {
+        if (!sound) return
+        val a = audio ?: return
+        if (a.ringerMode != android.media.AudioManager.RINGER_MODE_NORMAL) return
+        val fx = when (k.kind) {
+            KeyKind.SPACE -> android.media.AudioManager.FX_KEYPRESS_SPACEBAR
+            KeyKind.BACKSPACE -> android.media.AudioManager.FX_KEYPRESS_DELETE
+            KeyKind.ENTER -> android.media.AudioManager.FX_KEYPRESS_RETURN
+            else -> android.media.AudioManager.FX_KEYPRESS_STANDARD
+        }
+        runCatching { a.playSoundEffect(fx, -1f) }
     }
 
     companion object {

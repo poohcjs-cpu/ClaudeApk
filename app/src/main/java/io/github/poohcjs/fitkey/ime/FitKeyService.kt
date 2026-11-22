@@ -93,7 +93,7 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
 
     private fun applySettings() {
         settings = FitKeyStore.settings(this)
-        if (::engine.isInitialized) engine.settings = EngineSettings(settings.autoCorrect, settings.learn, settings.suggestions)
+        if (::engine.isInitialized) engine.settings = EngineSettings(settings.autoCorrect, settings.learn, settings.suggestions, settings.doubleSpacePeriod)
         // 숫자 줄·한/A 글쇠 설정이 바뀔 때만 새로 만든다 (글쇠 판정은 같은 배열 객체인지로 구분한다)
         val wantRows = if (settings.numberRow) 5 else 4
         val hasNumpadKey = letters.keys.any { it.kind == KeyKind.NUMPAD }
@@ -298,6 +298,12 @@ class FitKeyService : InputMethodService(), KeyboardView.Listener {
             v.align = s.align
             v.bottomGap = s.bottomGap
             v.vibrate = s.vibrate
+            v.vibeLevel = s.vibeLevel
+            v.sound = s.sound
+            v.theme = s.theme
+            v.preview = s.preview
+            v.hints = s.hints
+            v.longPressMs = s.longPressMs
             v.spaceSwipeLang = s.spaceSwipeLang
             v.showStrip = true
         }

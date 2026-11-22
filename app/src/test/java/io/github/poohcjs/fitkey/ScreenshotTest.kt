@@ -79,7 +79,7 @@ class ScreenshotTest {
     @Test @Config(qualifiers = "w400dp-h880dp-night-xxhdpi")
     fun calibrationDark() = activityShot("9_calibrate_dark", "calibrate")
 
-    @Test fun toolbarAndSwipeLabel() = save("11_toolbar", keyboard { toolbar = true; clip = "부산 해운대구 우동 1234-5 해운대아파트 101동" })
+    @Test fun toolbarAndSwipeLabel() = save("11_toolbar", keyboard { toolbar = true; clip = "부산 해운대구 우동 1234-5" })
 
     @Test @Config(qualifiers = "w400dp-h880dp-night-xxhdpi")
     fun otpBar() = save("14_otp", keyboard { toolbar = true; clip = "메모"; otp = "482915"; layout = KeyboardLayout.numpad(5); mode = Mode.NUMPAD })
@@ -115,5 +115,17 @@ class ScreenshotTest {
         root.draw(Canvas(bmp))
         val dir = File(System.getProperty("screenshots.dir") ?: "build/screenshots").apply { mkdirs() }
         File(dir, "7_home.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+    /** 설정 화면 전체 (아래까지) */
+    @Test fun homeFull() {
+        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        shadowOf(Looper.getMainLooper()).idle()
+        val root = a.window.decorView
+        root.measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(7600, View.MeasureSpec.EXACTLY))
+        root.layout(0, 0, 1200, 7600)
+        val bmp = Bitmap.createBitmap(1200, 7600, Bitmap.Config.ARGB_8888)
+        root.draw(Canvas(bmp))
+        val dir = File(System.getProperty("screenshots.dir") ?: "build/screenshots").apply { mkdirs() }
+        File(dir, "7b_home_full.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 }

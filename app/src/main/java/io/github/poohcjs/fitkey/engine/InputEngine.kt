@@ -46,7 +46,13 @@ data class SuggestionBar(
 )
 
 /** 사용자 설정 중 입력에 영향을 주는 것 */
-data class EngineSettings(val autoCorrect: Boolean = true, val learn: Boolean = true, val suggestions: Boolean = true)
+data class EngineSettings(
+    val autoCorrect: Boolean = true,
+    val learn: Boolean = true,
+    val suggestions: Boolean = true,
+    /** 스페이스를 빠르게 두 번 누르면 '. ' */
+    val doubleSpacePeriod: Boolean = true,
+)
 
 /**
  * 키보드의 두뇌: 글쇠 누름을 받아 글을 만들고, 오타를 고치고, 손 습관을 배운다.
@@ -86,6 +92,8 @@ class InputEngine(
     /** 낱말을 확정한 뒤 배울 것 (자동 고친 말은 되돌리지 않았을 때만 배운다) */
     private var pendingLearn: (() -> Unit)? = null
     private var lastShiftTap = 0L
+    /** 방금 스페이스를 누른 때 (스페이스 두 번 → 마침표). 다른 글쇠를 누르면 지운다 */
+    private var lastSpaceAt: Long? = null
     /** 지금 치는 낱말 바로 앞 낱말의 글쇠 (그 낱말 뒤에 한 칸 띄우고 치기 시작했을 때) */
     private var context: String? = null
 
@@ -109,6 +117,7 @@ class InputEngine(
 
     /** 커서가 옮겨졌거나 칸이 바뀌어 조합을 끝내야 할 때 */
     fun resetWord(finish: Boolean = true) {
+        lastSpaceAt = null
         if (finish && composing.isNotEmpty()) sink.finishComposing()
         word.clear()
         composing = ""
@@ -120,6 +129,7 @@ class InputEngine(
     fun onLetter(key: Key, ux: Float, uy: Float) {
         val l = key.letter ?: return
         lastCorrection = null
+        lastSpaceAt = null
         runPendingLearn()
         // 방금 지운 글쇠 대신 옆 글쇠를 눌렀다 → 지운 터치는 사실 이 글쇠를 노린 것
         // (그 터치가 새 글쇠 바로 옆이었을 때만: 지우고 전혀 다른 말을 이어 치는 경우는 배우지 않는다)
@@ -155,6 +165,7 @@ class InputEngine(
 
     // ── 지우기 ────────────────────────────────────────────
     fun onBackspace() {
+        lastSpaceAt = null
         runPendingLearnIfNotUndo()
         val c = lastCorrection
         if (c != null && word.isEmpty()) {
@@ -191,15 +202,36 @@ class InputEngine(
 
     // ── 스페이스·문장부호·엔터 ─────────────────────────────
     fun onSpace() {
+        val now = clock()
+        val prev = lastSpaceAt
+        lastSpaceAt = null
+        // 스페이스를 빠르게 두 번: 낱말 뒤 띄어쓰기를 '. '로 (글자 화면, 비밀번호·숫자 칸이 아닐 때)
+        if (settings.doubleSpacePeriod && word.isEmpty() && mode == Mode.LETTERS && !field.secret && !field.numeric &&
+            prev != null && now - prev in 0..DOUBLE_SPACE_MS
+        ) {
+            val before = sink.textBefore(2)
+            if (before != null && before.length == 2 && before[1] == ' ' && before[0].isLetterOrDigit()) {
+                runPendingLearn()
+                lastCorrection = null
+                sink.deleteBefore(1)
+                sink.commit(". ")
+                refreshAutoCap()
+                updateSuggestions()
+                onStateChanged()
+                return
+            }
+        }
         // 기호 화면은 띄어 쓰면 글자로 돌아가고, 숫자 패드는 그대로 둔다
         if (mode == Mode.SYMBOLS || mode == Mode.SYMBOLS2) { mode = Mode.LETTERS; onStateChanged() }
         finishWord(" ", correct = true)
+        lastSpaceAt = now
         refreshAutoCap()
         onStateChanged()
     }
 
     /** 숫자·기호·쉼표·마침표 */
     fun onText(text: String) {
+        lastSpaceAt = null
         val sentenceEnd = text in listOf(".", ",", "?", "!")
         finishWord(text, correct = sentenceEnd)
         refreshAutoCap()
@@ -207,6 +239,7 @@ class InputEngine(
     }
 
     fun onEnter() {
+        lastSpaceAt = null
         finishWord("", correct = false)
         sink.enter()
         // 새 줄은 새 문장: 예측을 거둔다
@@ -218,6 +251,7 @@ class InputEngine(
     /** 추천 낱말을 누름: 그 낱말로 바꾸고 띄어 쓴다 */
     fun onSuggestion(index: Int) {
         val s = bar.items.getOrNull(index) ?: return
+        lastSpaceAt = null
         val strokes = word.toList()
         if (strokes.isEmpty()) {
             // 띄어 쓴 뒤 '다음에 올 말'을 누름
@@ -443,5 +477,10 @@ class InputEngine(
         val at = ordered.indexOf(mid)
         bar = if (likely != null) SuggestionBar(ordered, autoIndex = null, likelyIndex = at) else SuggestionBar(ordered, autoIndex = at)
         onSuggestions(bar)
+    }
+
+    companion object {
+        /** 이 시간 안에 스페이스를 또 누르면 마침표 */
+        const val DOUBLE_SPACE_MS = 700L
     }
 }

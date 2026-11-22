@@ -249,4 +249,23 @@ class EngineTest {
         assertTrue(cal.done)
         assertTrue(cal.samples.size > 60)
     }
+
+    @Test fun doubleSpaceMakesPeriod() {
+        var now = 1000L
+        val sink = FakeSink()
+        val e = InputEngine(sink, TouchModel(), UserWords(), { if (it == Lang.KO) ko else en }, clock = { now })
+        e.layout = layout
+        e.startInput(FieldInfo())
+        e.type("dhsmf"); e.onSpace(); now += 300; e.onSpace()
+        assertEquals("오늘. ", sink.text)
+        e.type("sk"); e.onSpace(); now += 1500; e.onSpace()      // 느리게 두 번은 그냥 띄어쓰기
+        assertEquals("오늘. 나  ", sink.text)
+        e.settings = e.settings.copy(doubleSpacePeriod = false)
+        e.type("rk"); e.onSpace(); now += 100; e.onSpace()       // 끄면 그대로
+        assertEquals("오늘. 나  가  ", sink.text)
+        e.startInput(FieldInfo(secret = true))
+        e.settings = e.settings.copy(doubleSpacePeriod = true)
+        e.onLang(); e.type("ab"); e.onSpace(); now += 100; e.onSpace()   // 비밀번호 칸은 그대로
+        assertTrue(sink.text.endsWith("ab  "))
+    }
 }

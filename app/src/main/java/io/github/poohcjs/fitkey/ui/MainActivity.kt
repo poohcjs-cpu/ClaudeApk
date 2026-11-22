@@ -217,7 +217,7 @@ private fun HomeScreen(tick: Int, onSize: () -> Unit, onCalibrate: () -> Unit) {
         Spacer(Modifier.height(14.dp))
         Card {
             Text("설정", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            Spacer(Modifier.height(6.dp))
+            Section("크기·모양")
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     .clickable(onClick = onSize).padding(14.dp),
@@ -236,12 +236,26 @@ private fun HomeScreen(tick: Int, onSize: () -> Unit, onCalibrate: () -> Unit) {
             }
             Spacer(Modifier.height(6.dp))
             OneHandRow(s) { update(it) }
+            ChoiceRow("키보드 색", null, listOf("휴대폰 따라", "밝게", "어둡게"), s.theme) { update(s.copy(theme = it)) }
             Toggle("숫자 줄 보이기", "맨 위에 1~0 줄", s.numberRow) { update(s.copy(numberRow = it)) }
+            Toggle("누른 글자 크게 보기", "누르는 동안 글쇠 위에 글자를 크게 띄워요", s.preview) { update(s.copy(preview = it)) }
+            Toggle("글쇠에 기호 표시", "길게 누르면 나오는 기호(@ # ₩ …)를 글쇠 귀퉁이에 보여 줘요", s.hints) { update(s.copy(hints = it)) }
+
+            Section("입력")
             Toggle("스페이스바 밀어서 한/영 전환", "끄면 밀어서 커서 이동, 123 글쇠 자리에 한/A 글쇠가 다시 나와요", s.spaceSwipeLang) { update(s.copy(spaceSwipeLang = it)) }
+            Toggle("스페이스 두 번 눌러 마침표", "낱말 뒤에서 스페이스를 빠르게 두 번 누르면 ‘. ’이 들어가요", s.doubleSpacePeriod) { update(s.copy(doubleSpacePeriod = it)) }
+            ChoiceRow("길게 누르기 시간", "기호가 원치 않게 자주 나오면 ‘길게’, 기호를 빨리 넣고 싶으면 ‘짧게’", listOf("짧게", "보통", "길게"), s.longPress) {
+                update(s.copy(longPress = it))
+            }
             Toggle("자동 오타 수정", "스페이스를 누를 때 확실한 오타만 고쳐요", s.autoCorrect) { update(s.copy(autoCorrect = it)) }
             Toggle("추천 낱말", "고칠 말·이어질 말, 띄어 쓴 뒤엔 내가 자주 이어 쓰던 다음 낱말", s.suggestions) { update(s.copy(suggestions = it)) }
             Toggle("쓰면서 배우기", "손 습관(지우고 다시 친 글쇠·고친 오타)과 자주 쓰는 말 순서를 이 폰 안에서 배워요", s.learn) { update(s.copy(learn = it)) }
-            Toggle("누를 때 진동", null, s.vibrate) { update(s.copy(vibrate = it)) }
+
+            Section("소리·진동")
+            ChoiceRow("누를 때 진동", null, listOf("끄기", "약하게", "보통", "강하게"), if (s.vibrate) s.vibeLevel.coerceIn(1, 3) else 0) {
+                update(if (it == 0) s.copy(vibrate = false) else s.copy(vibrate = true, vibeLevel = it))
+            }
+            Toggle("누를 때 소리", "휴대폰이 소리 모드일 때만 나요 (무음·진동 모드에서는 조용히)", s.sound) { update(s.copy(sound = it)) }
         }
 
         Spacer(Modifier.height(14.dp))
@@ -611,6 +625,8 @@ private fun SizeScreen(onDone: () -> Unit) {
                 v.align = s.align
                 v.bottomGap = s.bottomGap
                 v.spaceSwipeLang = s.spaceSwipeLang
+                v.theme = s.theme
+                v.hints = s.hints
                 if (!v.adjusting) v.adjusting = true
             },
             modifier = Modifier.fillMaxWidth(),
@@ -629,19 +645,32 @@ private fun oneHandSide(s: KeySettings): Int? = when {
 /** 한 손 모드 켜고 끄기. 켤 때는 전에 맞춘 좁은 너비를 그대로, 없으면 80% */
 @Composable
 private fun OneHandRow(s: KeySettings, update: (KeySettings) -> Unit) {
-    val side = oneHandSide(s)
     val narrow = if (s.width < 0.95f) s.width else 0.8f
+    ChoiceRow(
+        "한 손 모드", "키보드를 좁혀 한쪽으로 모아요. 빈 쪽을 눌러도 키보드가 옮겨지지 않고 가장 가까운 글쇠로 쳐져요.",
+        listOf("끄기", "왼손", "오른손"), when (oneHandSide(s)) { 0 -> 0; -1 -> 1; 1 -> 2; else -> -1 },
+    ) {
+        update(when (it) { 1 -> s.copy(width = narrow, align = -1f); 2 -> s.copy(width = narrow, align = 1f); else -> s.copy(width = 1f, align = 0f) })
+    }
+}
+
+/** 제목 + 고르는 단추 줄 (selected: 고른 것의 순서, 없으면 -1) */
+@Composable
+private fun ChoiceRow(title: String, desc: String?, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Text("한 손 모드", fontSize = 14.5.sp)
-        Text("키보드를 좁혀 한쪽으로 모아요. 빈 쪽을 눌러도 키보드가 옮겨지지 않고 가장 가까운 글쇠로 쳐져요.",
-            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 16.sp)
+        Text(title, fontSize = 14.5.sp)
+        if (desc != null) Text(desc, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 16.sp)
         Spacer(Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Choice("끄기", side == 0) { update(s.copy(width = 1f, align = 0f)) }
-            Choice("왼손", side == -1) { update(s.copy(width = narrow, align = -1f)) }
-            Choice("오른손", side == 1) { update(s.copy(width = narrow, align = 1f)) }
+            options.forEachIndexed { i, o -> Choice(o, i == selected) { onSelect(i) } }
         }
     }
+}
+
+/** 설정 안의 작은 묶음 제목 */
+@Composable
+private fun Section(title: String) {
+    Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
 }
 
 @Composable
@@ -651,7 +680,7 @@ private fun Choice(label: String, selected: Boolean, onClick: () -> Unit) {
         color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.clip(RoundedCornerShape(10.dp))
             .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
     )
 }
 
