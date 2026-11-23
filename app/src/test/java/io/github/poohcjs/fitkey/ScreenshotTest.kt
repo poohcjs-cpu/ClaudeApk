@@ -116,16 +116,21 @@ class ScreenshotTest {
         val dir = File(System.getProperty("screenshots.dir") ?: "build/screenshots").apply { mkdirs() }
         File(dir, "7_home.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
-    /** 설정 화면 전체 (아래까지) */
-    @Test fun homeFull() {
-        val a = Robolectric.buildActivity(MainActivity::class.java).setup().get()
-        shadowOf(Looper.getMainLooper()).idle()
-        val root = a.window.decorView
-        root.measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(7600, View.MeasureSpec.EXACTLY))
-        root.layout(0, 0, 1200, 7600)
-        val bmp = Bitmap.createBitmap(1200, 7600, Bitmap.Config.ARGB_8888)
-        root.draw(Canvas(bmp))
-        val dir = File(System.getProperty("screenshots.dir") ?: "build/screenshots").apply { mkdirs() }
-        File(dir, "7b_home_full.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    /** 설정 탭마다 (1 모양, 2 입력, 3 편의, 4 학습) */
+    @Test fun settingsTabs() {
+        for (tab in 1..4) {
+            val intent = android.content.Intent(ctx, MainActivity::class.java).putExtra("tab", tab)
+            val a = Robolectric.buildActivity(MainActivity::class.java, intent).setup().get()
+            shadowOf(Looper.getMainLooper()).idle()
+            val root = a.window.decorView
+            root.measure(View.MeasureSpec.makeMeasureSpec(1200, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(2640, View.MeasureSpec.EXACTLY))
+            root.layout(0, 0, 1200, 2640)
+            shadowOf(Looper.getMainLooper()).idle()
+            val bmp = Bitmap.createBitmap(1200, 2640, Bitmap.Config.ARGB_8888)
+            root.draw(Canvas(bmp))
+            val dir = File(System.getProperty("screenshots.dir") ?: "build/screenshots").apply { mkdirs() }
+            File(dir, "7_tab$tab.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
     }
+
 }

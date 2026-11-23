@@ -98,17 +98,6 @@ class Calibration(private val touch: TouchModel, private val layout: KeyboardLay
         }
     }
 
-    /** 크기·위치 추천에 쓰는 글쇠별 자료 */
-    fun keyStats(): List<io.github.poohcjs.fitkey.engine.SizeAdvisor.KeyStat> = layout.letters.map { k ->
-        val c = k.letter!!
-        val v = perKey[c] ?: intArrayOf(0, 0)
-        val (ox, oy) = touch.offset(c)
-        io.github.poohcjs.fitkey.engine.SizeAdvisor.KeyStat(c, k.cx, k.row, v[0], v[1], ox, oy)
-    }
-
-    /** 글자 줄 번호 (위·가운데·아래) */
-    val letterRows: List<Int> get() = layout.letters.map { it.row }.distinct().sorted()
-
     /** 글쇠별 결과 (보정이 많이 필요한 순) */
     fun report(): List<KeyReport> = layout.letters.map { k ->
         val c = k.letter!!
